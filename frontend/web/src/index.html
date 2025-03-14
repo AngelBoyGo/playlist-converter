@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playlist Converter</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        input[type="url"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        input[type="url"]:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+            width: 100%;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .preview-card {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            display: none;
+        }
+        .preview-card h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .preview-card .platform-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 15px;
+        }
+        .platform-badge.apple-music {
+            background: #fb2d2d;
+            color: white;
+        }
+        .platform-badge.spotify {
+            background: #1DB954;
+            color: white;
+        }
+        .platform-badge.soundcloud {
+            background: #ff5500;
+            color: white;
+        }
+        .preview-card .original-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: #3498db;
+            text-decoration: none;
+        }
+        .preview-card .original-link:hover {
+            text-decoration: underline;
+        }
+        .convert-button {
+            margin-top: 15px;
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.3s;
+        }
+        .convert-button:hover {
+            background: #219a52;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: "."; }
+            40% { content: ".."; }
+            60%, 100% { content: "..."; }
+        }
+        .progress {
+            display: none;
+            margin-top: 15px;
+        }
+        .progress-bar {
+            height: 20px;
+            background: #f1f1f1;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: #3498db;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        .conversion-details {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-size: 14px;
+            display: none;
+        }
+        .conversion-details h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        .conversion-details p {
+            margin: 5px 0;
+            color: #666;
+        }
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Playlist Converter</h1>
+        <form id="converterForm">
+            <div class="form-group">
+                <label for="playlistUrl">Playlist URL (Apple Music, Spotify, or SoundCloud):</label>
+                <input type="url" id="playlistUrl" name="playlistUrl" 
+                       placeholder="https://music.apple.com/us/playlist/..." required>
+            </div>
+            <div class="form-group">
+                <label for="targetPlatform">Convert to:</label>
+                <select id="targetPlatform" name="targetPlatform" required>
+                    <option value="SoundCloud">SoundCloud</option>
+                    <option value="Spotify" disabled>Spotify (Coming Soon)</option>
+                    <option value="Apple Music" disabled>Apple Music (Coming Soon)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <button type="submit" id="loadButton">Load Playlist</button>
+            </div>
+        </form>
+
+        <div id="loading" class="loading">Loading playlist</div>
+
+        <div id="previewCard" class="preview-card">
+            <div id="platformBadge" class="platform-badge"></div>
+            <h3 id="playlistTitle">Playlist Title</h3>
+            <p id="playlistDetails">Loading playlist details...</p>
+            <a id="originalLink" href="#" target="_blank" class="original-link">Open Original Playlist</a>
+            <button id="convertButton" class="convert-button">Start Conversion</button>
+            <div id="progress" class="progress">
+                <div class="progress-bar">
+                    <div id="progressBarFill" class="progress-bar-fill"></div>
+                </div>
+                <div id="progressText" class="progress-text">Converting...</div>
+            </div>
+            <div id="conversionDetails" class="conversion-details">
+                <h4>Conversion Details</h4>
+                <div id="conversionInfo"></div>
+            </div>
+        </div>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // Add logging utility
+        const Logger = {
+            levels: {
+                DEBUG: 0,
+                INFO: 1,
+                WARN: 2,
+                ERROR: 3
+            },
+            currentLevel: 1, // Default to INFO
+            
+            log(level, message, data = null) {
+                if (level >= this.currentLevel) {
+                    const timestamp = new Date().toISOString();
+                    const logMessage = `[${timestamp}] ${level >= this.levels.ERROR ? 'ERROR' : level >= this.levels.WARN ? 'WARN' : level >= this.levels.INFO ? 'INFO' : 'DEBUG'}: ${message}`;
+                    
+                    console.log(logMessage);
+                    if (data) {
+                        console.log('Additional data:', data);
+                    }
+                    
+                    // For errors, we might want to store them or send to a monitoring service
+                    if (level >= this.levels.ERROR) {
+                        // You could send this to your error tracking service
+                        console.error(logMessage, data);
+                    }
+                }
+            },
+            
+            debug(message, data = null) {
+                this.log(this.levels.DEBUG, message, data);
+            },
+            
+            info(message, data = null) {
+                this.log(this.levels.INFO, message, data);
+            },
+            
+            warn(message, data = null) {
+                this.log(this.levels.WARN, message, data);
+            },
+            
+            error(message, data = null) {
+                this.log(this.levels.ERROR, message, data);
+            }
+        };
+
+        // Add error handling utility
+        const ErrorHandler = {
+            handleError(error, context = '') {
+                Logger.error(`${context}: ${error.message}`, error);
+                
+                let userMessage = 'An error occurred. Please try again.';
+                
+                if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                    userMessage = 'Unable to connect to the server. Please check your internet connection.';
+                } else if (error.response) {
+                    // Handle API error responses
+                    try {
+                        const errorData = error.response.data;
+                        userMessage = errorData.message || errorData.error || 'Server error occurred.';
+                    } catch (e) {
+                        userMessage = 'Server error occurred.';
+                    }
+                }
+                
+                showError(userMessage);
+                return userMessage;
+            }
+        };
+
+        const form = document.getElementById('converterForm');
+        const loading = document.getElementById('loading');
+        const previewCard = document.getElementById('previewCard');
+        const platformBadge = document.getElementById('platformBadge');
+        const playlistTitle = document.getElementById('playlistTitle');
+        const playlistDetails = document.getElementById('playlistDetails');
+        const originalLink = document.getElementById('originalLink');
+        const loadButton = document.getElementById('loadButton');
+        const convertButton = document.getElementById('convertButton');
+        const progress = document.getElementById('progress');
+        const progressBarFill = document.getElementById('progressBarFill');
+        const progressText = document.getElementById('progressText');
+        const result = document.getElementById('result');
+
+        function showError(message) {
+            Logger.error('Showing error to user:', message);
+            result.className = 'error';
+            result.innerHTML = `<strong>Error:</strong> ${message}`;
+            result.style.display = 'block';
+            
+            // Hide progress indicators
+            progress.style.display = 'none';
+            loading.style.display = 'none';
+        }
+
+        function detectPlatform(url) {
+            try {
+                if (url.includes('music.apple.com')) return 'apple-music';
+                if (url.includes('spotify.com')) return 'spotify';
+                if (url.includes('soundcloud.com')) return 'soundcloud';
+                return null;
+            } catch (error) {
+                Logger.error('Error detecting platform:', error);
+                return null;
+            }
+        }
+
+        function showPreview(url, platform) {
+            try {
+                Logger.info('Showing preview for:', { url, platform });
+                
+                platformBadge.className = `platform-badge ${platform}`;
+                platformBadge.textContent = platform.split('-').map(word => 
+                    word.charAt(0).toUpperCase() + word.slice(1)
+                ).join(' ');
+                
+                originalLink.href = url;
+                previewCard.style.display = 'block';
+                
+                playlistTitle.textContent = 'Ready to Convert';
+                playlistDetails.textContent = 'Click "Start Conversion" below to begin the conversion process';
+                
+                // Reset progress
+                progress.style.display = 'none';
+                progressBarFill.style.width = '0%';
+                progressText.textContent = 'Converting...';
+                
+                // Show convert button
+                convertButton.style.display = 'block';
+                
+            } catch (error) {
+                Logger.error('Error showing preview:', error);
+                ErrorHandler.handleError(error, 'Preview Display');
+            }
+        }
+
+        function showConversionDetails(details) {
+            try {
+                Logger.info('Showing conversion details:', details);
+                
+                const conversionDetails = document.getElementById('conversionDetails');
+                const conversionInfo = document.getElementById('conversionInfo');
+                
+                const detailsHtml = `
+                    <p><strong>Source Platform:</strong> ${details.source_platform}</p>
+                    <p><strong>Target Platform:</strong> ${details.target_platform}</p>
+                    <p><strong>Status:</strong> ${details.status}</p>
+                    <p><strong>Estimated Time:</strong> ${details.estimated_time}</p>
+                `;
+                
+                conversionInfo.innerHTML = detailsHtml;
+                conversionDetails.style.display = 'block';
+                
+            } catch (error) {
+                Logger.error('Error showing conversion details:', error);
+                ErrorHandler.handleError(error, 'Conversion Details Display');
+            }
+        }
+
+        async function startConversion(playlistUrl, targetPlatform) {
+            Logger.info('Starting conversion:', { playlistUrl, targetPlatform });
+            
+            try {
+                convertButton.disabled = true;
+                progress.style.display = 'block';
+                progressBarFill.style.width = '0%';
+                progressText.textContent = 'Starting conversion...';
+                
+                // Call the backend API with proper headers
+                const response = await fetch('http://localhost:8000/api/convert', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        url: playlistUrl,
+                        target_platform: targetPlatform
+                    })
+                });
+
+                // Check for network-level errors
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    let errorMessage;
+                    try {
+                        const errorData = JSON.parse(errorText);
+                        errorMessage = errorData.error || errorData.message || 'Server error occurred';
+                    } catch {
+                        errorMessage = errorText || `Server error: ${response.status}`;
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                // Parse JSON response with error handling
+                let data;
+                try {
+                    data = await response.json();
+                    Logger.info('Received API response:', data);
+                } catch (e) {
+                    Logger.error('Failed to parse API response:', e);
+                    throw new Error('Invalid response from server');
+                }
+
+                if (data.success) {
+                    // Show progress animation
+                    progressBarFill.style.width = '30%';
+                    progressText.textContent = 'Processing playlist...';
+                    
+                    // Show conversion details
+                    if (data.details) {
+                        showConversionDetails(data.details);
+                    }
+                    
+                    // Simulate progress (we'll replace this with real progress later)
+                    setTimeout(() => {
+                        progressBarFill.style.width = '60%';
+                        progressText.textContent = 'Converting tracks...';
+                    }, 1000);
+                    
+                    setTimeout(() => {
+                        progressBarFill.style.width = '100%';
+                        progressText.textContent = 'Conversion Complete!';
+                        
+                        result.className = 'success-message';
+                        result.innerHTML = `
+                            <strong>Success!</strong> ${data.message}<br>
+                            <small>Check the conversion details below for more information.</small>
+                        `;
+                        result.style.display = 'block';
+                    }, 2000);
+                    
+                } else {
+                    throw new Error(data.error || 'Conversion failed. Please try again.');
+                }
+                
+            } catch (error) {
+                ErrorHandler.handleError(error, 'Conversion Process');
+                // Hide conversion details on error
+                document.getElementById('conversionDetails').style.display = 'none';
+            } finally {
+                convertButton.disabled = false;
+            }
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            Logger.info('Form submitted');
+            
+            const playlistUrl = document.getElementById('playlistUrl').value;
+            loadButton.disabled = true;
+            result.style.display = 'none';
+            loading.style.display = 'block';
+            previewCard.style.display = 'none';
+            
+            try {
+                // Simple URL validation
+                const url = new URL(playlistUrl);
+                const platform = detectPlatform(url.href);
+                
+                if (!platform) {
+                    throw new Error('Please enter a valid Apple Music, Spotify, or SoundCloud playlist URL');
+                }
+
+                Logger.info('Valid URL detected:', { url: url.href, platform });
+                showPreview(url.href, platform);
+
+            } catch (error) {
+                ErrorHandler.handleError(error, 'URL Validation');
+            } finally {
+                loading.style.display = 'none';
+                loadButton.disabled = false;
+            }
+        });
+
+        convertButton.addEventListener('click', async () => {
+            const playlistUrl = document.getElementById('playlistUrl').value;
+            const targetPlatform = document.getElementById('targetPlatform').value;
+            Logger.info('Convert button clicked:', { playlistUrl, targetPlatform });
+            await startConversion(playlistUrl, targetPlatform);
+        });
+
+        // Initialize logging
+        Logger.info('Application initialized');
+    </script>
+</body>
+</html> 
