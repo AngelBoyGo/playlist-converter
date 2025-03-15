@@ -68,13 +68,24 @@ class PlaylistScraper:
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--disable-gpu')
+            
+            # For Heroku environment
+            if 'DYNO' in os.environ:
+                chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN', '/app/.apt/usr/bin/google-chrome')
             
             # Additional options for better scraping
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--disable-web-security')
             chrome_options.add_argument('--allow-running-insecure-content')
             chrome_options.add_argument('--lang=en-US,en')
-            chrome_options.add_argument('--remote-debugging-port=9222')
+            
+            # Set a realistic user agent
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            # Disable automation flags
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
             
             # Set preferences
             chrome_options.add_experimental_option('prefs', {
@@ -87,15 +98,20 @@ class PlaylistScraper:
                 'profile.default_content_setting_values.notifications': 2  # Disable notifications
             })
             
-            # Set a realistic user agent
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            
-            # Disable automation flags
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
             logger.info("Creating Chrome browser instance...")
-            self.browser = webdriver.Chrome(options=chrome_options)
+            
+            # Use WebDriverManager to handle driver installation
+            from webdriver_manager.chrome import ChromeDriverManager
+            from selenium.webdriver.chrome.service import Service
+            
+            # Setup ChromeDriver differently based on environment
+            if 'DYNO' in os.environ:  # We're on Heroku
+                chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH', '/app/.chromedriver/bin/chromedriver')
+                service = Service(executable_path=chrome_driver_path)
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
+            else:  # Local development
+                service = Service(ChromeDriverManager().install())
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
             
             # Set page load timeout and wait time
             self.browser.set_page_load_timeout(30)

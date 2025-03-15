@@ -34,14 +34,26 @@ class SoundCloudService:
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
-            # Use environment variable for Chrome binary location if available (for Heroku)
-            chrome_binary = os.environ.get('CHROME_EXECUTABLE_PATH')
-            if chrome_binary:
-                chrome_options.binary_location = chrome_binary
+            # For Heroku environment
+            if 'DYNO' in os.environ:
+                chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN', '/app/.apt/usr/bin/google-chrome')
             
-            self.browser = webdriver.Chrome(options=chrome_options)
+            # Use WebDriverManager to handle driver installation
+            from webdriver_manager.chrome import ChromeDriverManager
+            from selenium.webdriver.chrome.service import Service
+            
+            # Setup ChromeDriver differently based on environment
+            if 'DYNO' in os.environ:  # We're on Heroku
+                chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH', '/app/.chromedriver/bin/chromedriver')
+                service = Service(executable_path=chrome_driver_path)
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
+            else:  # Local development
+                service = Service(ChromeDriverManager().install())
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
+            
             self.browser.implicitly_wait(10)
             self._initialized = True
             logger.info("SoundCloud browser initialized successfully")
