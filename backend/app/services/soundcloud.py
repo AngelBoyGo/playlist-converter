@@ -29,6 +29,7 @@ class SoundCloudService:
             return
 
         try:
+            logger.info("SoundCloud: Starting browser initialization...")
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
@@ -38,30 +39,132 @@ class SoundCloudService:
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
             # For Heroku environment
-            if 'DYNO' in os.environ:
-                chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN', '/app/.apt/usr/bin/google-chrome')
+            is_heroku = 'DYNO' in os.environ
+            logger.info(f"SoundCloud: Running in Heroku environment: {is_heroku}")
             
-            # Use WebDriverManager to handle driver installation
-            from webdriver_manager.chrome import ChromeDriverManager
-            from selenium.webdriver.chrome.service import Service
+            if is_heroku:
+                chrome_binary_path = os.environ.get('GOOGLE_CHROME_BIN', '/app/.chrome-for-testing/chrome-linux64/chrome')
+                logger.info(f"SoundCloud: Setting Chrome binary location to: {chrome_binary_path}")
+                chrome_options.binary_location = chrome_binary_path
+                
+                # Verify if binary exists
+                if os.path.exists(chrome_binary_path):
+                    logger.info(f"SoundCloud: Chrome binary found at: {chrome_binary_path}")
+                else:
+                    logger.warning(f"SoundCloud: Chrome binary NOT found at: {chrome_binary_path}")
             
-            # Setup ChromeDriver differently based on environment
-            if 'DYNO' in os.environ:  # We're on Heroku
-                chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH', '/app/.chromedriver/bin/chromedriver')
-                service = Service(executable_path=chrome_driver_path)
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
-            else:  # Local development
-                service = Service(ChromeDriverManager().install())
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
+            logger.info("SoundCloud: Creating Chrome browser instance...")
+            
+            try:
+                # Use WebDriverManager to handle driver installation
+                from webdriver_manager.chrome import ChromeDriverManager
+                from webdriver_manager.core.os_manager import ChromeType
+                from selenium.webdriver.chrome.service import Service
+                
+                # Setup ChromeDriver differently based on environment
+                if is_heroku:
+                    chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH', '/app/.chrome-for-testing/chromedriver-linux64/chromedriver')
+                    logger.info(f"SoundCloud: Using ChromeDriver at: {chrome_driver_path}")
+                    
+                    # Verify if chromedriver exists
+                    if os.path.exists(chrome_driver_path):
+                        logger.info(f"SoundCloud: ChromeDriver found at: {chrome_driver_path}")
+                        # Check if executable
+                        if os.access(chrome_driver_path, os.X_OK):
+                            logger.info("SoundCloud: ChromeDriver is executable")
+                        else:
+                            logger.warning("SoundCloud: ChromeDriver exists but is not executable")
+                            try:
+                                os.chmod(chrome_driver_path, 0o755)
+                                logger.info("SoundCloud: Made ChromeDriver executable")
+                            except Exception as chmod_error:
+                                logger.error(f"SoundCloud: Failed to make ChromeDriver executable: {str(chmod_error)}")
+                    else:
+                        logger.warning(f"SoundCloud: ChromeDriver NOT found at: {chrome_driver_path}")
+                        # Try to list directory contents
+                        try:
+                            heroku_bin_dir = os.path.dirname(chrome_driver_path)
+                            if os.path.exists(heroku_bin_dir):
+                                files = os.listdir(heroku_bin_dir)
+                                logger.info(f"SoundCloud: Files in {heroku_bin_dir}: {files}")
+                            else:
+                                logger.warning(f"SoundCloud: Directory {heroku_bin_dir} does not exist")
+                                
+                                # Try to list root directories to find chromedriver
+                                logger.info("SoundCloud: Searching for chromedriver in common locations...")
+                                for search_dir in ['/app', '/usr/local/bin', '/usr/bin']:
+                                    if os.path.exists(search_dir):
+                                        logger.info(f"SoundCloud: Listing {search_dir}...")
+                                        try:
+                                            dir_files = os.listdir(search_dir)
+                                            logger.info(f"SoundCloud: Files in {search_dir}: {dir_files[:10]}...")
+                                            
+                                            # Search recursively for chromedriver
+                                            for root, dirs, files in os.walk(search_dir, topdown=True, followlinks=False):
+                                                if 'chromedriver' in files:
+                                                    found_path = os.path.join(root, 'chromedriver')
+                                                    logger.info(f"SoundCloud: Found chromedriver at: {found_path}")
+                                                    chrome_driver_path = found_path
+                                                    break
+                                                # Limit depth
+                                                if root.count(os.sep) - search_dir.count(os.sep) > 2:
+                                                    dirs.clear()
+                                        except Exception as list_error:
+                                            logger.error(f"SoundCloud: Error listing {search_dir}: {str(list_error)}")
+                        except Exception as dir_error:
+                            logger.error(f"SoundCloud: Error searching directories: {str(dir_error)}")
+                    
+                    try:
+                        logger.info(f"SoundCloud: Attempting to create Chrome browser with Service({chrome_driver_path})")
+                        service = Service(executable_path=chrome_driver_path)
+                        self.browser = webdriver.Chrome(service=service, options=chrome_options)
+                        logger.info("SoundCloud: Successfully created Chrome browser with Service object")
+                    except Exception as service_error:
+                        logger.error(f"SoundCloud: Failed to create browser with Service: {str(service_error)}")
+                        # Try alternate method
+                        logger.info("SoundCloud: Trying alternative method for Heroku...")
+                        try:
+                            logger.info("SoundCloud: Setting Chrome binary path directly...")
+                            chrome_options.add_argument(f"--webdriver-path={chrome_driver_path}")
+                            self.browser = webdriver.Chrome(options=chrome_options)
+                            logger.info("SoundCloud: Successfully created Chrome browser with direct options")
+                        except Exception as alt_error:
+                            logger.error(f"SoundCloud: Alternative method failed: {str(alt_error)}")
+                            raise
+                else:
+                    # Local development
+                    logger.info("SoundCloud: Using WebDriverManager for local development")
+                    try:
+                        # Try with ChromeDriverManager
+                        driver_path = ChromeDriverManager().install()
+                        logger.info(f"SoundCloud: WebDriverManager installed driver at: {driver_path}")
+                        service = Service(driver_path)
+                        self.browser = webdriver.Chrome(service=service, options=chrome_options)
+                        logger.info("SoundCloud: Successfully created Chrome browser with WebDriverManager")
+                    except Exception as wdm_error:
+                        logger.error(f"SoundCloud: WebDriverManager failed: {str(wdm_error)}")
+                        # Try to find chromedriver in PATH
+                        logger.info("SoundCloud: Trying to find chromedriver in PATH...")
+                        self.browser = webdriver.Chrome(options=chrome_options)
+                        logger.info("SoundCloud: Successfully created Chrome browser from PATH")
+            except ImportError as import_err:
+                logger.error(f"SoundCloud: ImportError with WebDriverManager: {str(import_err)}")
+                # Fallback to direct Chrome initialization
+                logger.info("SoundCloud: Falling back to direct Chrome initialization...")
+                self.browser = webdriver.Chrome(options=chrome_options)
+                logger.info("SoundCloud: Successfully created Chrome browser with direct initialization")
             
             self.browser.implicitly_wait(10)
             self._initialized = True
             logger.info("SoundCloud browser initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize SoundCloud browser: {str(e)}")
+            error_msg = f"Failed to initialize SoundCloud browser: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            # Log system PATH
+            logger.info(f"SoundCloud: System PATH: {os.environ.get('PATH', 'Not available')}")
             if self.browser:
                 await self.cleanup()
-            raise
+            raise Exception(error_msg)
 
     async def cleanup(self):
         """Clean up browser resources."""
