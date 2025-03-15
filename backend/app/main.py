@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from backend.app.services.playlist_scraper import PlaylistScraper
 from backend.app.services.soundcloud import SoundCloudService
 import re
+from backend.app.routes.debug import router as debug_router
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Log system information at startup
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Python executable: {sys.executable}")
+logger.info(f"Current working directory: {os.getcwd()}")
+logger.info(f"Module search paths: {sys.path}")
+logger.info(f"Environment variables: PATH={os.environ.get('PATH', 'Not set')}")
+logger.info(f"Chrome env vars: GOOGLE_CHROME_BIN={os.environ.get('GOOGLE_CHROME_BIN', 'Not set')}, CHROMEDRIVER_PATH={os.environ.get('CHROMEDRIVER_PATH', 'Not set')}")
+
 # Define request and response models
 class ConversionRequest(BaseModel):
     url: str
@@ -31,26 +40,19 @@ class ConversionRequest(BaseModel):
     start_index: int = 0
     batch_size: int = 5
 
-class TrackResult(BaseModel):
-    source_track: Dict[str, Any]
-    target_track: Optional[Dict[str, Any]] = None
-    success: bool
-    message: Optional[str] = None
-
-class ConversionDetails(BaseModel):
-    converted_tracks: int
-    total_tracks: int
-    success_rate: float
-    tracks: List[Dict[str, Any]]
-    current_batch: Optional[Dict[str, Any]] = None
+class Track(BaseModel):
+    name: str
+    artists: List[str]
+    position: int
+    url: Optional[str] = None
 
 class ConversionResponse(BaseModel):
-    success: bool
-    message: str
-    success_count: int
-    failure_count: int
-    results: List[TrackResult]
-    details: ConversionDetails
+    tracks: List[Track]
+    total_tracks: int
+    playlist_name: str
+    source_platform: str
+    target_platform: str
+    message: Optional[str] = None
 
 class SearchRequest(BaseModel):
     track_name: str
@@ -58,285 +60,142 @@ class SearchRequest(BaseModel):
     exclude_current: Optional[bool] = False
     blacklisted_urls: Optional[List[str]] = None
 
-# Initialize FastAPI app
-app = FastAPI(title="Playlist Converter API")
-
-# Setup CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+# Initialize the FastAPI app
+app = FastAPI(
+    title="Playlist Converter API",
+    description="Convert playlists between different music streaming platforms",
+    version="1.0.0"
 )
 
-# Create API router with /api prefix
-api_router = APIRouter(prefix="/api")
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, you should specify the exact origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def create_error_response(message: str, request_id: str = None) -> ConversionResponse:
-    """Helper function to create standardized error responses"""
-    if request_id:
-        logger.error(f"[ERROR][{request_id}] {message}")
-    return ConversionResponse(
-        success=False,
-        message=message,
-        success_count=0,
-        failure_count=0,
-        results=[],
-        details=ConversionDetails(
-            converted_tracks=0,
-            total_tracks=0,
-            success_rate=0.0,
-            tracks=[]
-        )
-    )
+# Include debug routes
+app.include_router(debug_router, prefix="/debug", tags=["debug"])
 
-def create_success_response(
-    success_count: int,
-    failure_count: int,
-    results: List[TrackResult],
-    converted_tracks: List[Dict[str, Any]],
-    request_id: str,
-    current_batch: Optional[Dict[str, Any]] = None
-) -> ConversionResponse:
-    """Helper function to create standardized success responses"""
-    total_tracks = success_count + failure_count
-    success_rate = (success_count / total_tracks) if total_tracks > 0 else 0.0
-    
-    response = ConversionResponse(
-        success=True,
-        message=f"Conversion completed with {success_count} successes and {failure_count} failures.",
-        success_count=success_count,
-        failure_count=failure_count,
-        results=results,
-        details=ConversionDetails(
-            converted_tracks=success_count,
-            total_tracks=total_tracks,
-            success_rate=success_rate,
-            tracks=converted_tracks,
-            current_batch=current_batch
-        )
-    )
-    
-    logger.info(f"[TRACE][{request_id}] Created success response: {response.dict()}")
-    return response
+# Mount static files
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
+    logger.info("Mounted static files successfully")
+except Exception as e:
+    logger.error(f"Failed to mount static files: {str(e)}")
 
-# Health check endpoint
-@api_router.get("/health")
-async def health_check():
-    """Simple health check endpoint to verify API is running."""
-    logger.info("[TRACE] Health check endpoint called")
-    return {"status": "ok", "message": "API is running"}
+@app.get("/", response_class=HTMLResponse)
+async def get_root():
+    """Serve the root HTML file."""
+    try:
+        with open("../frontend/index.html") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content, status_code=200)
+    except Exception as e:
+        logger.error(f"Failed to read index.html: {str(e)}")
+        return HTMLResponse(content="Internal Server Error", status_code=500)
 
-# Playlist conversion endpoint
-@api_router.post("/convert", response_model=ConversionResponse)
+@app.post("/api/convert", response_model=ConversionResponse)
 async def convert_playlist(request: ConversionRequest):
-    request_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    logger.info(f"[TRACE][{request_id}] Starting conversion process for URL: {request.url}")
-    logger.info(f"[TRACE][{request_id}] Request data: {request.dict()}")
-    
-    conversion_stats = {
-        'request_id': request_id,
-        'start_time': datetime.now(),
-        'scraper_init_success': False,
-        'soundcloud_init_success': False,
-        'playlist_fetch_success': False,
-        'tracks_processed': 0,
-        'tracks_found': 0,
-        'search_attempts': 0,
-        'search_successes': 0,
-        'errors': []
-    }
-    
-    scraper = None
-    sc_service = None
+    """Convert a playlist from one platform to another."""
+    logger.info(f"Received conversion request: {request.dict()}")
     
     try:
-        # Initialize services
-        scraper = PlaylistScraper()
-        await scraper.initialize_browser()
-        conversion_stats['scraper_init_success'] = True
-        logger.info(f"[TRACE][{request_id}] Scraper initialized successfully")
-        
-        sc_service = SoundCloudService()
-        await sc_service.initialize_browser()
-        conversion_stats['soundcloud_init_success'] = True
-        logger.info(f"[TRACE][{request_id}] SoundCloud service initialized successfully")
-        
-        # Get playlist data using the new platform-agnostic method
+        # Initialize the playlist scraper
+        playlist_scraper = PlaylistScraper()
         try:
-            playlist_data = await scraper.get_playlist_data(request.url)
-            if not playlist_data:
-                error_msg = "Failed to fetch playlist data: No data returned"
-                logger.error(f"[ERROR][{request_id}] {error_msg}")
-                return create_error_response(error_msg, request_id)
-            
-            conversion_stats['playlist_fetch_success'] = True
-            logger.info(f"[TRACE][{request_id}] Successfully fetched playlist: {playlist_data.get('name', 'Unknown')} from {playlist_data.get('platform', 'Unknown platform')}")
-            logger.debug(f"[DEBUG][{request_id}] Raw playlist data: {playlist_data}")
-        except Exception as e:
-            error_msg = f"Failed to fetch playlist data: {str(e)}"
-            logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-            return create_error_response(error_msg, request_id)
+            await playlist_scraper.initialize_browser()
+            logger.info("Successfully initialized playlist scraper browser")
+        except Exception as browser_err:
+            logger.error(f"Failed to initialize browser: {str(browser_err)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to initialize browser: {str(browser_err)}")
         
-        # Process tracks with pagination
-        tracks = playlist_data.get('tracks', [])
-        if not tracks:
-            error_msg = "No tracks found in the playlist"
-            logger.error(f"[ERROR][{request_id}] {error_msg}")
-            return create_error_response(error_msg, request_id)
+        # Get the playlist data
+        try:
+            playlist_data = await playlist_scraper.get_playlist_data(request.url)
+            logger.info(f"Successfully scraped playlist: {playlist_data.get('name', 'Unknown')}")
+        except Exception as scrape_err:
+            logger.error(f"Error scraping playlist: {str(scrape_err)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error during playlist scraping: {str(scrape_err)}")
+        finally:
+            # Always clean up the browser
+            await playlist_scraper.cleanup()
         
-        conversion_stats['tracks_found'] = len(tracks)
-        logger.info(f"[TRACE][{request_id}] Found {len(tracks)} tracks in playlist")
-        
-        results = []
-        success_count = 0
-        failure_count = 0
-        converted_tracks = []
-        
-        # Get the batch of tracks based on start_index and batch_size
-        start_idx = request.start_index
-        end_idx = min(start_idx + request.batch_size, len(tracks))
-        batch_tracks = tracks[start_idx:end_idx]
-        
-        # Process tracks in the current batch
-        for i, track in enumerate(batch_tracks, start=start_idx):
+        # Initialize SoundCloud service if needed
+        soundcloud = None
+        if request.target_platform.lower() == "soundcloud":
             try:
-                track_name = track.get('name', 'Unknown Track')
-                artists = track.get('artists', ['Unknown Artist'])
-                artist_str = ", ".join(artists)
-                
-                logger.info(f"[TRACE][{request_id}] Processing track {i+1}/{len(tracks)}: '{track_name}' by {artist_str}")
-                
-                try:
-                    sc_track = await sc_service.search_track(track_name, artist_str)
-                    if sc_track:
-                        logger.info(f"[TRACE][{request_id}] Found match: '{sc_track.get('title')}' by {sc_track.get('user', {}).get('username')}")
-                        
-                        track_result = TrackResult(
-                            source_track=track,
-                            target_track=sc_track,
-                            success=True,
-                            message="Successfully found on SoundCloud"
-                        )
-                        
-                        converted_track = {
-                            "original": track,
-                            "converted": sc_track,
-                            "success": True,
-                            "error": None
-                        }
-                        
-                        results.append(track_result)
-                        converted_tracks.append(converted_track)
-                        success_count += 1
-                        
-                        logger.info(f"[TRACE][{request_id}] Successfully processed track {i+1}")
-                    else:
-                        msg = f"No matches found for '{track_name}' by {artist_str}"
-                        logger.warning(f"[WARN][{request_id}] {msg}")
-                        
-                        track_result = TrackResult(
-                            source_track=track,
-                            success=False,
-                            message=msg
-                        )
-                        
-                        converted_track = {
-                            "original": track,
-                            "converted": None,
-                            "success": False,
-                            "error": msg
-                        }
-                        
-                        results.append(track_result)
-                        converted_tracks.append(converted_track)
-                        failure_count += 1
-                except Exception as search_error:
-                    error_msg = f"Error searching track '{track_name}': {str(search_error)}"
-                    logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-                    
-                    track_result = TrackResult(
-                        source_track=track,
-                        success=False,
-                        message=error_msg
-                    )
-                    
-                    converted_track = {
-                        "original": track,
-                        "converted": None,
-                        "success": False,
-                        "error": error_msg
-                    }
-                    
-                    results.append(track_result)
-                    converted_tracks.append(converted_track)
-                    failure_count += 1
-            except Exception as track_error:
-                error_msg = f"Error processing track: {str(track_error)}"
-                logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-                
-                track_result = TrackResult(
-                    source_track=track,
-                    success=False,
-                    message=error_msg
-                )
-                
-                converted_track = {
-                    "original": track,
-                    "converted": None,
-                    "success": False,
-                    "error": error_msg
-                }
-                
-                results.append(track_result)
-                converted_tracks.append(converted_track)
-                failure_count += 1
-            
-            conversion_stats['tracks_processed'] += 1
+                soundcloud = SoundCloudService()
+                await soundcloud.initialize_browser()
+                logger.info("Successfully initialized SoundCloud service browser")
+            except Exception as sc_err:
+                logger.error(f"Failed to initialize SoundCloud browser: {str(sc_err)}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to initialize SoundCloud browser: {str(sc_err)}")
         
-        # Create success response with pagination info
-        logger.info(f"[TRACE][{request_id}] Conversion completed. Stats: {conversion_stats}")
-        response = create_success_response(
-            success_count=success_count,
-            failure_count=failure_count,
-            results=results,
-            converted_tracks=converted_tracks,
-            request_id=request_id,
-            current_batch={
-                "start": start_idx,
-                "end": end_idx,
-                "has_more": end_idx < len(tracks)
-            }
+        # Get a batch of tracks
+        tracks = playlist_data.get("tracks", [])
+        start = request.start_index
+        end = min(start + request.batch_size, len(tracks))
+        batch = tracks[start:end]
+        
+        # Convert tracks
+        converted_tracks = []
+        for track in batch:
+            try:
+                track_name = track.get("name", "").strip()
+                artists = track.get("artists", [])
+                artist_name = artists[0] if artists else None
+                
+                # Search for track on target platform
+                target_url = None
+                if request.target_platform.lower() == "soundcloud" and soundcloud:
+                    result = await soundcloud.search_track(track_name, artist_name)
+                    if result:
+                        target_url = result.get("url")
+                
+                # Create track object
+                converted_track = Track(
+                    name=track_name,
+                    artists=artists,
+                    position=track.get("position", 0),
+                    url=target_url
+                )
+                converted_tracks.append(converted_track)
+                logger.info(f"Converted track: {track_name}")
+            except Exception as track_err:
+                logger.error(f"Error converting track {track.get('name', 'Unknown')}: {str(track_err)}")
+                # Continue with next track rather than failing the whole request
+        
+        # Clean up SoundCloud browser
+        if soundcloud:
+            await soundcloud.cleanup()
+        
+        # Create response
+        response = ConversionResponse(
+            tracks=converted_tracks,
+            total_tracks=len(tracks),
+            playlist_name=playlist_data.get("name", "Unknown Playlist"),
+            source_platform=playlist_data.get("platform", "Unknown"),
+            target_platform=request.target_platform,
+            message=f"Converted {len(converted_tracks)} of {len(tracks)} tracks"
         )
         
         return response
-        
     except Exception as e:
         error_msg = f"Error during conversion process: {str(e)}"
-        logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-        logger.error(f"[ERROR][{request_id}] Final conversion stats: {conversion_stats}")
-        return create_error_response(error_msg, request_id)
-        
-    finally:
-        # Cleanup
-        logger.info(f"[TRACE][{request_id}] Cleaning up resources")
-        if sc_service:
-            try:
-                await sc_service.cleanup()
-                logger.info(f"[TRACE][{request_id}] SoundCloud service cleaned up")
-            except Exception as e:
-                logger.error(f"[ERROR][{request_id}] Error cleaning up SoundCloud service: {str(e)}", exc_info=True)
-        
-        if scraper:
-            try:
-                await scraper.cleanup()
-                logger.info(f"[TRACE][{request_id}] Scraper cleaned up")
-            except Exception as e:
-                logger.error(f"[ERROR][{request_id}] Error cleaning up scraper: {str(e)}", exc_info=True)
+        logger.error(error_msg, exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint to verify the service is running."""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 # Search endpoint
-@api_router.post("/search")
+@app.post("/api/search")
 async def search_track(request: SearchRequest):
     """Search for a track on SoundCloud with support for blacklisting."""
     request_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -373,21 +232,6 @@ async def search_track(request: SearchRequest):
     finally:
         if sc_service:
             await sc_service.cleanup()
-
-# IMPORTANT: Include the API router in the main app
-app.include_router(api_router)
-
-# Mount static files - make sure this comes AFTER the API routes
-current_dir = os.path.dirname(os.path.abspath(__file__))
-frontend_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "frontend"))
-logger.info(f"Serving frontend from: {frontend_dir}")
-app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
-
-# Root path handler for index.html
-@app.get("/", response_class=HTMLResponse)
-async def get_index():
-    index_path = os.path.join(frontend_dir, "index.html")
-    return FileResponse(index_path)
 
 if __name__ == "__main__":
     import uvicorn
