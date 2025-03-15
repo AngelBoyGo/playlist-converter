@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from backend.app.services.playlist_scraper import PlaylistScraper
-from backend.app.services.soundcloud import SoundCloudService
+from app.services.playlist_scraper import PlaylistScraper
+from app.services.soundcloud import SoundCloudService
 import re
 
 # Configure logging
