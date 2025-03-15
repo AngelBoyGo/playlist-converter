@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from urllib.parse import quote
 from datetime import datetime
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ class SoundCloudService:
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            # Use environment variable for Chrome binary location if available (for Heroku)
+            chrome_binary = os.environ.get('CHROME_EXECUTABLE_PATH')
+            if chrome_binary:
+                chrome_options.binary_location = chrome_binary
             
             self.browser = webdriver.Chrome(options=chrome_options)
             self.browser.implicitly_wait(10)

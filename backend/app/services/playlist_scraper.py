@@ -333,47 +333,34 @@ class PlaylistScraper:
             return False
 
     def _init_browser(self) -> None:
-        """Initialize the Chrome browser with custom options."""
+        """Initialize browser with Chrome options."""
         try:
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--window-size=1920,1080')
+            
+            # Use environment variable for Chrome binary location if available (for Heroku)
+            chrome_binary = os.environ.get('CHROME_EXECUTABLE_PATH')
+            if chrome_binary:
+                chrome_options.binary_location = chrome_binary
+            
             chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-automation')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_argument('--disable-infobars')
+            
+            # Add user agent to avoid detection
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
-            # Disable notifications and images, enable JavaScript
-            chrome_options.add_experimental_option('prefs', {
-                'profile.default_content_setting_values.notifications': 2,
-                'profile.managed_default_content_settings.images': 2,
-                'profile.managed_default_content_settings.javascript': 1
-            })
-            
-            # Disable automation flags
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
             self.browser = webdriver.Chrome(options=chrome_options)
-            self.browser.implicitly_wait(10)  # seconds
+            self.browser.set_page_load_timeout(60)
+            self.browser.implicitly_wait(10)
             
-            # Verify browser is responsive
-            self.browser.get('about:blank')
-            self.browser.current_url  # This will raise an exception if browser is not responsive
-            
-            logging.info("Browser initialized successfully")
-            self._initialized = True
-            
+            logger.info("Browser initialized successfully")
         except Exception as e:
-            logging.error(f"Failed to initialize browser: {str(e)}")
-            if hasattr(self, 'browser') and self.browser:
-                self.browser.quit()
-            self.browser = None
-            self._initialized = False
-            raise
+            logger.error(f"Failed to initialize browser: {str(e)}")
+            raise BrowserInitializationError(f"Failed to initialize browser: {str(e)}")
 
     def _cleanup_browser(self):
         """Clean up browser resources safely."""
