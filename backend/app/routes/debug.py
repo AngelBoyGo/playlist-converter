@@ -224,4 +224,53 @@ async def find_chromedriver():
         return results
     except Exception as e:
         logger.error(f"Error in find_chromedriver: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error searching for chromedriver: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error searching for chromedriver: {str(e)}")
+
+@router.get("/chrome-env")
+async def chrome_env():
+    """Provides detailed information about the Chrome environment."""
+    chrome_paths = [
+        "/app/.chromedriver/bin/chromedriver",
+        "/app/.apt/usr/bin/google-chrome",
+        "/app/.chrome-for-testing/chrome-linux64/chrome",
+        "/app/.chrome-for-testing/chromedriver-linux64/chromedriver"
+    ]
+    
+    result = {
+        "environment_variables": {
+            "CHROMEDRIVER_PATH": os.environ.get("CHROMEDRIVER_PATH", "Not set"),
+            "GOOGLE_CHROME_BIN": os.environ.get("GOOGLE_CHROME_BIN", "Not set"),
+            "CHROME_EXECUTABLE_PATH": os.environ.get("CHROME_EXECUTABLE_PATH", "Not set"),
+            "CHROME_BINARY_LOCATION": os.environ.get("CHROME_BINARY_LOCATION", "Not set")
+        },
+        "path_checks": {},
+        "directory_listings": {}
+    }
+    
+    # Check if files exist
+    for path in chrome_paths:
+        result["path_checks"][path] = {
+            "exists": os.path.exists(path),
+            "is_file": os.path.isfile(path) if os.path.exists(path) else False,
+            "is_executable": os.access(path, os.X_OK) if os.path.exists(path) else False
+        }
+    
+    # Check common directories
+    directories = [
+        "/app/.chromedriver",
+        "/app/.chromedriver/bin",
+        "/app/.chrome-for-testing",
+        "/app/.chrome-for-testing/chrome-linux64",
+        "/app/.chrome-for-testing/chromedriver-linux64"
+    ]
+    
+    for directory in directories:
+        if os.path.exists(directory) and os.path.isdir(directory):
+            try:
+                result["directory_listings"][directory] = os.listdir(directory)
+            except Exception as e:
+                result["directory_listings"][directory] = f"Error: {str(e)}"
+        else:
+            result["directory_listings"][directory] = "Directory does not exist"
+    
+    return result 
