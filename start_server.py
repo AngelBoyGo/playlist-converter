@@ -29,11 +29,24 @@ def main():
     # Determine if we're in production or development
     is_prod = os.environ.get("ENV", "").lower() == "production" or os.environ.get("RENDER", "")
     
-    # Configure host and port
+    # Configure host and port - Render sets PORT env var
     host = "0.0.0.0"  # Bind to all interfaces for production
     port = int(os.environ.get("PORT", 8080))
     
     logger.info(f"Starting server on {host}:{port} (Production: {is_prod})...")
+    
+    # List directories to debug frontend path issues
+    frontend_dir = os.path.join(backend_dir, "frontend-dist")
+    logger.info(f"Looking for frontend at: {frontend_dir}")
+    if os.path.exists(frontend_dir):
+        logger.info(f"Frontend directory exists: {os.listdir(frontend_dir)}")
+    else:
+        logger.warning(f"Frontend directory not found at {frontend_dir}")
+        # Look in alternative locations
+        alt_frontend = os.path.join(os.getcwd(), "frontend-dist")
+        if os.path.exists(alt_frontend):
+            logger.info(f"Found frontend at alternative location: {alt_frontend}")
+            logger.info(f"Contents: {os.listdir(alt_frontend)}")
     
     # Start the FastAPI server
     uvicorn.run(

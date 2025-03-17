@@ -378,22 +378,39 @@ app.include_router(api_router)
 
 # Mount static files - make sure this comes AFTER the API routes
 current_dir = os.path.dirname(os.path.abspath(__file__))
-frontend_dir = os.path.abspath(os.path.join(current_dir, "..", "frontend-dist"))
+base_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
 
-# Only mount frontend if it exists
-if os.path.exists(frontend_dir):
+# Try multiple locations for the frontend
+possible_frontend_paths = [
+    os.path.join(base_dir, "frontend-dist"),  # /app/frontend-dist
+    os.path.join(base_dir, "frontend", "dist"),  # /app/frontend/dist
+    "/app/frontend-dist"  # Absolute path in Docker container
+]
+
+frontend_dir = None
+for path in possible_frontend_paths:
+    if os.path.exists(path):
+        frontend_dir = path
+        logger.info(f"Found frontend at: {frontend_dir}")
+        break
+
+if frontend_dir:
+    # Add a catch-all route for static files
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     logger.info(f"Mounted frontend at {frontend_dir}")
+    
+    @app.get("/", response_class=HTMLResponse)
+    async def get_index():
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Frontend not found")
 else:
     logger.warning("Frontend build not found - serving API only")
-
-# Root path handler for index.html
-@app.get("/", response_class=HTMLResponse)
-async def get_index():
-    index_path = os.path.join(frontend_dir, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    raise HTTPException(status_code=404, detail="Frontend not found")
+    
+    @app.get("/")
+    async def api_root():
+        return {"message": "API is running. Frontend not available."}
 
 if __name__ == "__main__":
     import uvicorn

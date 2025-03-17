@@ -1,6 +1,6 @@
 FROM python:3.9-slim
 
-# Install Chrome dependencies
+# Install Chrome dependencies and Node.js
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -15,6 +15,14 @@ RUN apt-get update && apt-get install -y \
     libxslt1.1 \
     fonts-liberation \
     libasound2 \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js and npm
+RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+    && apt-get update \
+    && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,18 +53,20 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy the frontend files and build
+COPY frontend /app/frontend
+WORKDIR /app/frontend
+RUN npm install && \
+    npm run build && \
+    mkdir -p /app/frontend-dist && \
+    cp -r dist/* /app/frontend-dist/
+
 # Copy the rest of the application
+WORKDIR /app
 COPY . .
 
 # Create a health check endpoint
 RUN echo 'import fastapi; app = fastapi.FastAPI(); @app.get("/api/health"); def health(): return {"status": "ok"}' > /app/health_check.py
-
-# Add these lines after installing Python dependencies
-RUN cd frontend && \
-    npm install && \
-    npm run build && \
-    mv dist ../frontend-dist && \
-    cd ..
 
 # Expose port
 EXPOSE 8080
