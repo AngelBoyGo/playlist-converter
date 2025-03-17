@@ -1,4 +1,8 @@
-const API_BASE_URL = 'http://localhost:8080';
+import { ConversionRequest, ConversionResponse, SearchRequest, Alternative } from './types';
+
+// Determine the base URL based on the environment
+// In production, use relative URLs; in development, use localhost
+const API_BASE_URL = window.location.origin;
 
 export async function convertPlaylist(request: ConversionRequest): Promise<ConversionResponse> {
   const response = await fetch(`${API_BASE_URL}/api/convert`, {
