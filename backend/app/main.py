@@ -378,9 +378,15 @@ app.include_router(api_router)
 
 # Mount static files - make sure this comes AFTER the API routes
 current_dir = os.path.dirname(os.path.abspath(__file__))
-frontend_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "frontend", "dist"))
-logger.info(f"Serving frontend from: {frontend_dir}")
-app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+base_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
+frontend_dir = os.path.join(base_dir, "frontend", "dist")
+
+# Only mount frontend if it exists
+if os.path.exists(frontend_dir):
+    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    logger.info(f"Mounted frontend at {frontend_dir}")
+else:
+    logger.warning("Frontend build not found - serving API only")
 
 # Root path handler for index.html
 @app.get("/", response_class=HTMLResponse)
