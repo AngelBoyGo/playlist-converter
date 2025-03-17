@@ -29,6 +29,14 @@ class SoundCloudService:
             return
 
         try:
+            # Print the Chrome version for diagnostics
+            import subprocess
+            try:
+                chrome_version = subprocess.check_output(['google-chrome', '--version']).decode('utf-8').strip()
+                logger.info(f"Chrome version: {chrome_version}")
+            except Exception as e:
+                logger.warning(f"Failed to get Chrome version: {str(e)}")
+            
             chrome_options = webdriver.ChromeOptions()
             
             # Check if headless mode is enabled via environment variable
@@ -41,7 +49,7 @@ class SoundCloudService:
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
             
             # Add any additional Chrome flags from environment variables
             chrome_flags = os.environ.get("CHROMEDRIVER_FLAGS", "")
@@ -51,17 +59,11 @@ class SoundCloudService:
                         chrome_options.add_argument(flag.strip())
                 logger.info(f"Added additional Chrome flags: {chrome_flags}")
             
-            # Enable WebDriver Manager to handle ChromeDriver installation
-            logger.info("Creating Chrome browser instance with Selenium Manager...")
-            import selenium.webdriver.chrome.service as chrome_service
+            # Use a direct path to a pre-installed ChromeDriver
+            logger.info("Creating Chrome browser instance with pre-installed ChromeDriver...")
             
-            # Force use of Selenium Manager
-            os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress WebDriver Manager logs
-            os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL verification
-            os.environ['USE_SELENIUM_MANAGER'] = 'true'
-            
-            # Create a Service object with automatic driver detection
-            chrome_service = webdriver.ChromeService()
+            # Create a Service object with the direct ChromeDriver path
+            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
             self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
             
             self.browser.implicitly_wait(10)

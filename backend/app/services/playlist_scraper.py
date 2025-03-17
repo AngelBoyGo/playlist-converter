@@ -61,6 +61,14 @@ class PlaylistScraper:
             return
 
         try:
+            # Print the Chrome version for diagnostics
+            import subprocess
+            try:
+                chrome_version = subprocess.check_output(['google-chrome', '--version']).decode('utf-8').strip()
+                logger.info(f"Chrome version: {chrome_version}")
+            except Exception as e:
+                logger.warning(f"Failed to get Chrome version: {str(e)}")
+                
             chrome_options = webdriver.ChromeOptions()
             
             # Essential Chrome options for scraping
@@ -88,24 +96,17 @@ class PlaylistScraper:
             })
             
             # Set a realistic user agent
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
             
             # Disable automation flags
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Enable WebDriver Manager to handle ChromeDriver installation
-            logger.info("Creating Chrome browser instance with Selenium Manager...")
-            import selenium.webdriver.chrome.service as chrome_service
-            from selenium import webdriver
+            # Use direct ChromeDriver path
+            logger.info("Creating Chrome browser instance with pre-installed ChromeDriver...")
             
-            # Force use of Selenium Manager by setting these options
-            os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress WebDriver Manager logs
-            os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL verification
-            os.environ['USE_SELENIUM_MANAGER'] = 'true'
-            
-            # Create a Service object with automatic driver detection
-            chrome_service = webdriver.ChromeService()
+            # Create a Service object with the direct ChromeDriver path
+            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
             self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
             
             # Set page load timeout and wait time
@@ -116,7 +117,7 @@ class PlaylistScraper:
             logger.info("Configuring CDP commands...")
             self.browser.execute_cdp_cmd('Network.enable', {})
             self.browser.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
             })
             self.browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
                 "headers": {
