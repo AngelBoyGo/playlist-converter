@@ -73,6 +73,12 @@ app.add_middleware(
 # Create API router with /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Health check endpoint
+@api_router.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring."""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
 def create_error_response(message: str, request_id: str = None) -> ConversionResponse:
     """Helper function to create standardized error responses"""
     if request_id:
@@ -120,13 +126,6 @@ def create_success_response(
     
     logger.info(f"[TRACE][{request_id}] Created success response: {response.dict()}")
     return response
-
-# Health check endpoint
-@api_router.get("/health")
-async def health_check():
-    """Simple health check endpoint to verify API is running."""
-    logger.info("[TRACE] Health check endpoint called")
-    return {"status": "ok", "message": "API is running"}
 
 # Playlist conversion endpoint
 @api_router.post("/convert", response_model=ConversionResponse)

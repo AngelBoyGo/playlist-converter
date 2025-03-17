@@ -26,14 +26,23 @@ def main():
     logger.info(f"Current working directory: {os.getcwd()}")
     logger.info(f"Python path: {sys.path}")
     
+    # Determine if we're in production or development
+    is_prod = os.environ.get("ENV", "").lower() == "production" or os.environ.get("RENDER", "")
+    
+    # Configure host and port
+    host = "0.0.0.0"  # Bind to all interfaces for production
+    port = int(os.environ.get("PORT", 8080))
+    
+    logger.info(f"Starting server on {host}:{port} (Production: {is_prod})...")
+    
     # Start the FastAPI server
-    logger.info("Starting server on port 8080...")
     uvicorn.run(
         "backend.app.main:app",  # Use the module path relative to the python path
-        host="127.0.0.1",
-        port=8080,
-        reload=True,
-        log_level="debug"
+        host=host,
+        port=port,
+        reload=not is_prod,  # Only enable reload in development
+        workers=1,  # Single worker for Selenium compatibility
+        log_level="info" if is_prod else "debug"
     )
 
 if __name__ == "__main__":

@@ -10,4 +10,12 @@ services:
       - key: PYTHON_VERSION
         value: "3.9"
       - key: ALLOW_ORIGINS
-        value: "*" 
+        value: "*"
+      - key: PORT
+        value: "8080"
+      - key: RENDER
+        value: "true"
+      - key: SELENIUM_HEADLESS
+        value: "true"
+      - key: CHROMEDRIVER_FLAGS
+        value: "--no-sandbox --disable-dev-shm-usage --disable-gpu" 

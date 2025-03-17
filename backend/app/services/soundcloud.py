@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from urllib.parse import quote
 from datetime import datetime
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,26 @@ class SoundCloudService:
 
         try:
             chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_argument('--headless=new')
+            
+            # Check if headless mode is enabled via environment variable
+            headless = os.environ.get("SELENIUM_HEADLESS", "true").lower() == "true"
+            if headless:
+                chrome_options.add_argument('--headless=new')
+                logger.info("Running Chrome in headless mode")
+            
+            # Add default arguments for container environments
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            # Add any additional Chrome flags from environment variables
+            chrome_flags = os.environ.get("CHROMEDRIVER_FLAGS", "")
+            if chrome_flags:
+                for flag in chrome_flags.split():
+                    if flag.strip():
+                        chrome_options.add_argument(flag.strip())
+                logger.info(f"Added additional Chrome flags: {chrome_flags}")
             
             self.browser = webdriver.Chrome(options=chrome_options)
             self.browser.implicitly_wait(10)
