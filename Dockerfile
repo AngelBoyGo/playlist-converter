@@ -34,12 +34,16 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver with fixed version
-RUN wget -q "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip" \
+# Install ChromeDriver that matches the installed Chrome version
+RUN CHROME_VERSION=$(google-chrome --version | cut -d ' ' -f 3 | cut -d '.' -f 1) \
+    && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}" -O chrome_version \
+    && CHROMEDRIVER_VERSION=$(cat chrome_version) \
+    && echo "Using ChromeDriver version: ${CHROMEDRIVER_VERSION} for Chrome version: ${CHROME_VERSION}" \
+    && wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" \
     && unzip chromedriver_linux64.zip \
     && mv chromedriver /usr/local/bin/ \
     && chmod +x /usr/local/bin/chromedriver \
-    && rm chromedriver_linux64.zip
+    && rm chromedriver_linux64.zip chrome_version
 
 # Set display port to avoid crash
 ENV DISPLAY=:99
