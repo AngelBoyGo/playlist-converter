@@ -94,8 +94,19 @@ class PlaylistScraper:
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            logger.info("Creating Chrome browser instance...")
-            self.browser = webdriver.Chrome(options=chrome_options)
+            # Enable WebDriver Manager to handle ChromeDriver installation
+            logger.info("Creating Chrome browser instance with Selenium Manager...")
+            import selenium.webdriver.chrome.service as chrome_service
+            from selenium import webdriver
+            
+            # Force use of Selenium Manager by setting these options
+            os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress WebDriver Manager logs
+            os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL verification
+            os.environ['USE_SELENIUM_MANAGER'] = 'true'
+            
+            # Create a Service object with automatic driver detection
+            chrome_service = webdriver.ChromeService()
+            self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
             
             # Set page load timeout and wait time
             self.browser.set_page_load_timeout(30)

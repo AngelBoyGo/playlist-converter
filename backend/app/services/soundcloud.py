@@ -51,7 +51,19 @@ class SoundCloudService:
                         chrome_options.add_argument(flag.strip())
                 logger.info(f"Added additional Chrome flags: {chrome_flags}")
             
-            self.browser = webdriver.Chrome(options=chrome_options)
+            # Enable WebDriver Manager to handle ChromeDriver installation
+            logger.info("Creating Chrome browser instance with Selenium Manager...")
+            import selenium.webdriver.chrome.service as chrome_service
+            
+            # Force use of Selenium Manager
+            os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress WebDriver Manager logs
+            os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL verification
+            os.environ['USE_SELENIUM_MANAGER'] = 'true'
+            
+            # Create a Service object with automatic driver detection
+            chrome_service = webdriver.ChromeService()
+            self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+            
             self.browser.implicitly_wait(10)
             self._initialized = True
             logger.info("SoundCloud browser initialized successfully")

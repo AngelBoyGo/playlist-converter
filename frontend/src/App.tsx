@@ -47,9 +47,26 @@ function App() {
         start_index: 0,
         batch_size: batchSize,
       });
+      
+      if (!response.success) {
+        throw new Error(response.message || 'Conversion failed');
+      }
+      
       setResult(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred');
+      console.error('Error during conversion:', err);
+      let errorMessage = 'An unexpected error occurred';
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      
+      // Look for specific browser initialization errors
+      if (errorMessage.includes('browser') || errorMessage.includes('ChromeDriver')) {
+        errorMessage = 'Browser initialization failed. There may be a compatibility issue with ChromeDriver. Please try again later or contact support.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -169,9 +186,27 @@ function App() {
           {/* Error Message */}
           {error && (
             <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-8 rounded-lg">
-              <div className="flex items-center">
-                <AlertCircle className="w-5 h-5 text-red-400 mr-2" />
-                <p className="text-red-700">{error}</p>
+              <div className="flex items-start">
+                <AlertCircle className="w-5 h-5 text-red-400 mr-2 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h3 className="text-red-800 font-medium mb-1">Error</h3>
+                  <p className="text-red-700">{error}</p>
+                  {error.includes('browser') && (
+                    <div className="mt-2 pt-2 border-t border-red-200">
+                      <p className="text-sm text-red-600">
+                        The server is having trouble with the Chrome browser setup. This can happen due to:
+                      </p>
+                      <ul className="list-disc list-inside text-sm text-red-600 mt-1">
+                        <li>Version compatibility issues</li>
+                        <li>Server resource limitations</li>
+                        <li>Temporary service disruptions</li>
+                      </ul>
+                      <p className="text-sm text-red-600 mt-2">
+                        Please try again later or try with a smaller playlist.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

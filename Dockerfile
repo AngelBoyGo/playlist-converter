@@ -34,21 +34,14 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver that matches the installed Chrome version
-RUN CHROME_VERSION=$(google-chrome --version | cut -d ' ' -f 3 | cut -d '.' -f 1) \
-    && wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}" -O chrome_version \
-    && CHROMEDRIVER_VERSION=$(cat chrome_version) \
-    && echo "Using ChromeDriver version: ${CHROMEDRIVER_VERSION} for Chrome version: ${CHROME_VERSION}" \
-    && wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" \
-    && unzip chromedriver_linux64.zip \
-    && mv chromedriver /usr/local/bin/ \
-    && chmod +x /usr/local/bin/chromedriver \
-    && rm chromedriver_linux64.zip chrome_version
+# Remove any existing ChromeDriver to avoid conflicts
+RUN rm -f /usr/local/bin/chromedriver /usr/bin/chromedriver
 
 # Set display port to avoid crash
 ENV DISPLAY=:99
 ENV PYTHONUNBUFFERED=1
 ENV SELENIUM_HEADLESS=true
+ENV USE_SELENIUM_MANAGER=true
 
 # Set up working directory
 WORKDIR /app
