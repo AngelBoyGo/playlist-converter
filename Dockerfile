@@ -51,6 +51,13 @@ COPY . .
 # Create a health check endpoint
 RUN echo 'import fastapi; app = fastapi.FastAPI(); @app.get("/api/health"); def health(): return {"status": "ok"}' > /app/health_check.py
 
+# Add these lines after installing Python dependencies
+RUN cd frontend && \
+    npm install && \
+    npm run build && \
+    mv dist ../frontend-dist && \
+    cd ..
+
 # Expose port
 EXPOSE 8080
 

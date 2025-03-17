@@ -378,8 +378,7 @@ app.include_router(api_router)
 
 # Mount static files - make sure this comes AFTER the API routes
 current_dir = os.path.dirname(os.path.abspath(__file__))
-base_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
-frontend_dir = os.path.join(base_dir, "frontend", "dist")
+frontend_dir = os.path.abspath(os.path.join(current_dir, "..", "frontend-dist"))
 
 # Only mount frontend if it exists
 if os.path.exists(frontend_dir):
@@ -392,7 +391,9 @@ else:
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
     index_path = os.path.join(frontend_dir, "index.html")
-    return FileResponse(index_path)
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail="Frontend not found")
 
 if __name__ == "__main__":
     import uvicorn
