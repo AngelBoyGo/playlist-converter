@@ -59,12 +59,25 @@ class SoundCloudService:
                         chrome_options.add_argument(flag.strip())
                 logger.info(f"Added additional Chrome flags: {chrome_flags}")
             
-            # Use a direct path to a pre-installed ChromeDriver
-            logger.info("Creating Chrome browser instance with pre-installed ChromeDriver...")
-            
-            # Create a Service object with the direct ChromeDriver path
-            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
-            self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+            # First try using the pre-installed ChromeDriver
+            try:
+                logger.info("Trying with pre-installed ChromeDriver at /usr/bin/chromedriver")
+                chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
+                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+            except Exception as e:
+                logger.warning(f"Failed with pre-installed ChromeDriver: {str(e)}")
+                
+                # Fallback to Selenium's built-in WebDriver manager
+                logger.info("Falling back to Selenium's WebDriver Manager")
+                from selenium.webdriver.chrome.service import Service as ChromeService
+                from webdriver_manager.chrome import ChromeDriverManager
+                
+                # Set environment variables for WebDriver Manager
+                os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress WebDriver Manager logs
+                os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL verification
+                
+                chrome_service = ChromeService(ChromeDriverManager().install())
+                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
             
             self.browser.implicitly_wait(10)
             self._initialized = True
@@ -98,7 +111,7 @@ class SoundCloudService:
         # Remove common words and characters that might interfere with matching
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
         source_words = [w for w in source.split() if w not in stop_words]
-        target_words = [w for w in target.split() if w not in stop_words]
+        source_words = [w for w in source.split() if w not in stop_words]
         
         # Calculate word-by-word similarity
         source_set = set(source_words)

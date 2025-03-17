@@ -95,19 +95,33 @@ class PlaylistScraper:
                 'profile.default_content_setting_values.notifications': 2  # Disable notifications
             })
             
-            # Set a realistic user agent
+            # Set a realistic user agent that matches current Chrome version
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
             
             # Disable automation flags
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Use direct ChromeDriver path
-            logger.info("Creating Chrome browser instance with pre-installed ChromeDriver...")
-            
-            # Create a Service object with the direct ChromeDriver path
-            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
-            self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+            # First try using the pre-installed ChromeDriver
+            try:
+                logger.info("Trying with pre-installed ChromeDriver at /usr/bin/chromedriver")
+                chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
+                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+            except Exception as e:
+                logger.warning(f"Failed with pre-installed ChromeDriver: {str(e)}")
+                
+                # Fallback to Selenium's built-in WebDriver Manager
+                logger.info("Falling back to Selenium Manager")
+                from selenium.webdriver.chrome.service import Service as ChromeService
+                from webdriver_manager.chrome import ChromeDriverManager
+                
+                # Configure WebDriver Manager
+                os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress logs
+                os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL
+                
+                # Try with WebDriver Manager
+                chrome_service = ChromeService(ChromeDriverManager().install())
+                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
             
             # Set page load timeout and wait time
             self.browser.set_page_load_timeout(30)
