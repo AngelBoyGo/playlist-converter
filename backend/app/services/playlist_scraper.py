@@ -68,24 +68,13 @@ class PlaylistScraper:
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-gpu')
-            
-            # For Heroku environment
-            if 'DYNO' in os.environ:
-                chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN', '/app/.apt/usr/bin/google-chrome')
             
             # Additional options for better scraping
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--disable-web-security')
             chrome_options.add_argument('--allow-running-insecure-content')
             chrome_options.add_argument('--lang=en-US,en')
-            
-            # Set a realistic user agent
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            
-            # Disable automation flags
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
+            chrome_options.add_argument('--remote-debugging-port=9222')
             
             # Set preferences
             chrome_options.add_experimental_option('prefs', {
@@ -98,20 +87,15 @@ class PlaylistScraper:
                 'profile.default_content_setting_values.notifications': 2  # Disable notifications
             })
             
+            # Set a realistic user agent
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            # Disable automation flags
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
             logger.info("Creating Chrome browser instance...")
-            
-            # Use WebDriverManager to handle driver installation
-            from webdriver_manager.chrome import ChromeDriverManager
-            from selenium.webdriver.chrome.service import Service
-            
-            # Setup ChromeDriver differently based on environment
-            if 'DYNO' in os.environ:  # We're on Heroku
-                chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH', '/app/.chromedriver/bin/chromedriver')
-                service = Service(executable_path=chrome_driver_path)
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
-            else:  # Local development
-                service = Service(ChromeDriverManager().install())
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
+            self.browser = webdriver.Chrome(options=chrome_options)
             
             # Set page load timeout and wait time
             self.browser.set_page_load_timeout(30)
@@ -349,34 +333,47 @@ class PlaylistScraper:
             return False
 
     def _init_browser(self) -> None:
-        """Initialize browser with Chrome options."""
+        """Initialize the Chrome browser with custom options."""
         try:
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            
-            # Use environment variable for Chrome binary location if available (for Heroku)
-            chrome_binary = os.environ.get('CHROME_EXECUTABLE_PATH')
-            if chrome_binary:
-                chrome_options.binary_location = chrome_binary
-            
-            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-infobars')
-            
-            # Add user agent to avoid detection
+            chrome_options.add_argument('--disable-automation')
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
-            self.browser = webdriver.Chrome(options=chrome_options)
-            self.browser.set_page_load_timeout(60)
-            self.browser.implicitly_wait(10)
+            # Disable notifications and images, enable JavaScript
+            chrome_options.add_experimental_option('prefs', {
+                'profile.default_content_setting_values.notifications': 2,
+                'profile.managed_default_content_settings.images': 2,
+                'profile.managed_default_content_settings.javascript': 1
+            })
             
-            logger.info("Browser initialized successfully")
+            # Disable automation flags
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            self.browser = webdriver.Chrome(options=chrome_options)
+            self.browser.implicitly_wait(10)  # seconds
+            
+            # Verify browser is responsive
+            self.browser.get('about:blank')
+            self.browser.current_url  # This will raise an exception if browser is not responsive
+            
+            logging.info("Browser initialized successfully")
+            self._initialized = True
+            
         except Exception as e:
-            logger.error(f"Failed to initialize browser: {str(e)}")
-            raise BrowserInitializationError(f"Failed to initialize browser: {str(e)}")
+            logging.error(f"Failed to initialize browser: {str(e)}")
+            if hasattr(self, 'browser') and self.browser:
+                self.browser.quit()
+            self.browser = None
+            self._initialized = False
+            raise
 
     def _cleanup_browser(self):
         """Clean up browser resources safely."""
@@ -529,253 +526,430 @@ class PlaylistScraper:
             }
         }
 
-    async def get_spotify_playlist_data(self, playlist_url: str) -> Dict:
-        """Get playlist data from Spotify."""
-        request_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logger.info(f"[TRACE][{request_id}] Starting Spotify playlist data extraction for URL: {playlist_url}")
+    async def get_spotify_playlist_data(self, url: str) -> Dict:
+        """Extract playlist data from Spotify."""
+        search_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logger.info(f"[TRACE][{search_id}] Starting Spotify playlist data extraction for URL: {url}")
         
-        if not self._initialized:
+        # Initialize browser if not already done
+        if not self.browser:
             await self.initialize_browser()
             
-        # Ensure we're starting with a fresh page
+        # Attempt to clear browser state (without causing errors)
         try:
+            # Clear cookies
             self.browser.delete_all_cookies()
-            self.browser.execute_script("window.localStorage.clear();")
-            self.browser.execute_script("window.sessionStorage.clear();")
+            logger.info(f"[TRACE][{search_id}] Cleared browser cookies")
         except Exception as e:
-            logger.warning(f"[WARN][{request_id}] Failed to clear browser state: {str(e)}")
-        
-        start_time = datetime.now()
-        scraping_stats = self._create_scraping_stats(request_id, playlist_url)
+            logger.warning(f"[WARN][{search_id}] Failed to clear cookies: {str(e)}")
         
         try:
-            # Navigate to the playlist URL with retry logic
-            max_retries = 3
-            retry_count = 0
-            page_load_start = datetime.now()
-            
-            while retry_count < max_retries:
-                try:
-                    logger.info(f"[TRACE][{request_id}] Attempt {retry_count + 1}/{max_retries} to load playlist page")
-                    self.browser.get(playlist_url)
-                    
-                    # Wait for initial page load
-                    await asyncio.sleep(5)
-                    
-                    # Check if page loaded successfully
-                    if "spotify.com" not in self.browser.current_url:
-                        raise Exception("Page did not load correctly")
-                    
-                    # Try to accept cookies if the button exists
-                    try:
-                        cookie_button = WebDriverWait(self.browser, 5).until(
-                            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
-                        )
-                        cookie_button.click()
-                        logger.info(f"[TRACE][{request_id}] Accepted cookies")
-                        await asyncio.sleep(2)
-                    except TimeoutException:
-                        logger.info(f"[TRACE][{request_id}] No cookie banner found or already accepted")
-                    
-                    scraping_stats['page_load_success'] = True
-                    scraping_stats['performance_metrics']['page_load_duration'] = self._serialize_datetime(datetime.now() - page_load_start)
-                    break
-                    
-                except Exception as e:
-                    retry_count += 1
-                    error_msg = f"Failed to load page (attempt {retry_count}): {str(e)}"
-                    scraping_stats['errors'].append({
-                        'phase': 'page_load',
-                        'attempt': retry_count,
-                        'error': str(e),
-                        'timestamp': self._serialize_datetime(datetime.now())
-                    })
-                    logger.error(f"[ERROR][{request_id}] {error_msg}")
-                    
-                    if retry_count == max_retries:
-                        raise Exception(f"Failed to load page after {max_retries} attempts")
-                    await asyncio.sleep(2 ** retry_count)
-            
-            # Wait for main content containers with detailed logging
-            content_load_start = datetime.now()
-            
-            # First wait for any of these selectors to be present
-            playlist_container_selectors = [
-                'div[data-testid="playlist-tracklist"]',
-                'div[data-testid="playlist-page"]',
-                'div.contentSpacing',
-                'div[class*="PlaylistPage"]'
-            ]
-            
-            container_found = False
-            for selector in playlist_container_selectors:
-                try:
-                    WebDriverWait(self.browser, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                    )
-                    logger.info(f"[TRACE][{request_id}] Found playlist container with selector: {selector}")
-                    container_found = True
-                    break
-                except TimeoutException:
-                    continue
-            
-            if not container_found:
-                error_msg = "Failed to find playlist container with any selector"
-                logger.error(f"[ERROR][{request_id}] {error_msg}")
-                raise TimeoutException(error_msg)
-            
-            # Wait for track rows with multiple selectors
-            track_row_selectors = [
-                'div[data-testid="track-row"]',
-                'div[role="row"]',
-                'div[class*="TrackListRow"]',
-                'div.tracklist-row'
-            ]
-            
-            track_rows = None
-            used_selector = None
-            
-            for selector in track_row_selectors:
-                try:
-                    logger.info(f"[TRACE][{request_id}] Trying track row selector: {selector}")
-                    # Use a shorter timeout for each selector attempt
-                    track_rows = WebDriverWait(self.browser, 5).until(
-                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
-                    )
-                    if track_rows and len(track_rows) > 0:
-                        used_selector = selector
-                        logger.info(f"[TRACE][{request_id}] Successfully found {len(track_rows)} track rows with selector: {selector}")
-                        break
-                except TimeoutException:
-                    logger.warning(f"[WARN][{request_id}] Selector {selector} failed")
-                    continue
-            
-            if not track_rows:
-                error_msg = "Failed to find track rows with any selector"
-                logger.error(f"[ERROR][{request_id}] {error_msg}")
-                # Take screenshot for debugging
-                screenshot_path = f"error_screenshot_{request_id}_no_tracks.png"
-                self.browser.save_screenshot(screenshot_path)
-                logger.info(f"[TRACE][{request_id}] Saved error screenshot to {screenshot_path}")
-                raise TimeoutException(error_msg)
-            
-            scraping_stats['content_load_success'] = True
-            scraping_stats['performance_metrics']['content_load_duration'] = self._serialize_datetime(datetime.now() - content_load_start)
-            
-            # Extract playlist data with improved selector for actual playlist tracks
-            extraction_start = datetime.now()
+            # Clear localStorage if possible
+            self.browser.execute_script("try { window.localStorage.clear(); } catch(e) { console.log('localStorage not accessible'); }")
+            logger.info(f"[TRACE][{search_id}] Attempted to clear localStorage")
+        except Exception as e:
+            logger.warning(f"[WARN][{search_id}] Failed to clear localStorage: {str(e)}")
+        
+        # Track extraction attempts
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
             try:
-                playlist_data = self.browser.execute_script("""
-                    function getPlaylistData() {
-                        // Get playlist name
-                        const playlistName = document.querySelector('h1')?.textContent?.trim() || 'Unknown Playlist';
+                logger.info(f"[TRACE][{search_id}] Attempt {attempt}/{max_attempts} to load playlist page")
+                
+                # Load the playlist page
+                self.browser.get(url)
+                
+                # Wait for initial page load
+                await asyncio.sleep(5)
+                
+                # Handle cookie consent if it appears
+                try:
+                    cookie_selectors = [
+                        'button[data-testid="cookie-policy-dialog-accept-button"]',
+                        'button#onetrust-accept-btn-handler',
+                        'button:contains("Accept cookies")'
+                    ]
+                    
+                    for selector in cookie_selectors:
+                        try:
+                            cookie_button = WebDriverWait(self.browser, 3).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                            )
+                            cookie_button.click()
+                            logger.info(f"[TRACE][{search_id}] Accepted cookies using selector: {selector}")
+                            await asyncio.sleep(1)
+                            break
+                        except:
+                            continue
+                            
+                except Exception as e:
+                    logger.info(f"[TRACE][{search_id}] No cookie consent dialog or failed to handle it: {str(e)}")
+                
+                # Save screenshot of loaded page for debugging
+                try:
+                    screenshot_path = f"spotify_page_{search_id}.png"
+                    self.browser.save_screenshot(screenshot_path)
+                    logger.info(f"[TRACE][{search_id}] Saved page screenshot to {screenshot_path}")
+                except Exception as e:
+                    logger.warning(f"[WARN][{search_id}] Failed to save screenshot: {str(e)}")
+                
+                # Wait for playlist content to load
+                playlist_selectors = [
+                    'div[data-testid="playlist-tracklist"]',
+                    'section[data-testid="playlist-page"]',
+                    'div.contentSpacing',
+                    'div[data-testid="track-list"]'
+                ]
+                
+                playlist_container = None
+                container_selector = None
+                
+                for selector in playlist_selectors:
+                    try:
+                        playlist_container = WebDriverWait(self.browser, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                        container_selector = selector
+                        logger.info(f"[TRACE][{search_id}] Found playlist container with selector: {selector}")
+                        break
+                    except:
+                        continue
+                
+                if not playlist_container:
+                    raise Exception("Could not find playlist container element")
+                
+                # Scroll down to load all tracks
+                for _ in range(3):
+                    self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    await asyncio.sleep(1)
+                
+                # Extract playlist title
+                playlist_name = None
+                name_selectors = [
+                    'h1[data-testid="entityTitle"]',
+                    'h1.Type__TypeElement',
+                    'div.under-title-text h1',
+                    'div[data-testid="playlist-page"] h1'
+                ]
+                
+                for selector in name_selectors:
+                    try:
+                        element = self.browser.find_element(By.CSS_SELECTOR, selector)
+                        playlist_name = element.text.strip()
+                        if playlist_name:
+                            logger.info(f"[TRACE][{search_id}] Found playlist name: {playlist_name}")
+                            break
+                    except:
+                        continue
+                
+                if not playlist_name:
+                    logger.warning(f"[WARN][{search_id}] Could not extract playlist name")
+                    playlist_name = "Unknown Playlist"
+                
+                # Extract track rows
+                row_selectors = [
+                    'div[data-testid="tracklist-row"]',
+                    'div[role="row"]',
+                    'div.tracklist-container div[draggable="true"]'
+                ]
+                
+                track_rows = []
+                for selector in row_selectors:
+                    try:
+                        rows = playlist_container.find_elements(By.CSS_SELECTOR, selector)
+                        if rows:
+                            track_rows = rows
+                            logger.info(f"[TRACE][{search_id}] Found {len(rows)} track rows with selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not track_rows:
+                    logger.error(f"[ERROR][{search_id}] No track rows found in playlist container")
+                    raise Exception("No track rows found in playlist")
+                
+                # Extract track data
+                tracks = []
+                
+                # Try multiple JavaScript extraction approaches
+                track_data = self.browser.execute_script("""
+                    function extractTracks() {
+                        // Primary approach: use data-testid attributes
                         
-                        // Get only the main playlist tracks container, excluding recommendations
-                        const playlistContainer = document.querySelector('div[data-testid="playlist-tracklist"]');
-                        if (!playlistContainer) {
-                            console.error('Playlist container not found');
-                            return null;
+                        // IMPORTANT: Only target the main playlist tracks container, not the recommendations
+                        const mainPlaylistContainer = document.querySelector('div[data-testid="playlist-tracklist"]');
+                        if (!mainPlaylistContainer) {
+                            console.error('Main playlist container not found');
+                            return [];
                         }
                         
-                        // Get only the track rows within the main playlist section
-                        const trackRows = Array.from(playlistContainer.querySelectorAll('div[data-testid="tracklist-row"]'));
-                        console.log('Processing', trackRows.length, 'track rows');
+                        // Only get track rows from within the main playlist container
+                        const rows = mainPlaylistContainer.querySelectorAll('div[data-testid="tracklist-row"]');
+                        console.log('Found', rows.length, 'tracks in main playlist container');
                         
-                        const tracks = [];
-                        trackRows.forEach((row, index) => {
-                            try {
-                                // Try multiple selectors for title
-                                const titleElement = 
-                                    row.querySelector('[data-testid="internal-track-link"]') ||
-                                    row.querySelector('a[href*="/track/"]') ||
-                                    row.querySelector('div[class*="tracklist-name"]') ||
-                                    row.querySelector('div[class*="track-name"]');
-                                
-                                // Try multiple selectors for artists
-                                const artistElements = 
-                                    Array.from(row.querySelectorAll('a[href*="/artist/"]')) ||
-                                    Array.from(row.querySelectorAll('span[class*="artist-name"]')) ||
-                                    Array.from(row.querySelectorAll('span[class*="track-artist"]'));
-                                
-                                // Try multiple selectors for duration
-                                const durationElement = 
-                                    row.querySelector('[data-testid="tracklist-duration"]') ||
-                                    row.querySelector('div[class*="duration"]') ||
-                                    row.querySelector('span[class*="duration"]');
-                                
-                                // Check if this is a valid track row (has required elements)
-                                if (titleElement && artistElements.length > 0) {
-                                    const track = {
-                                        name: titleElement.textContent.trim(),
-                                        artists: artistElements.map(el => el.textContent.trim()).filter(Boolean),
-                                        duration: durationElement ? durationElement.textContent.trim() : '',
-                                        position: index + 1
-                                    };
+                        if (rows.length > 0) {
+                            const tracks = [];
+                            for (const row of rows) {
+                                try {
+                                    // Verify this is an actual track row and not a header or recommendation
+                                    if (row.closest('[data-testid="recommendations-section"]') ||
+                                        row.closest('.RecommendationItem') ||
+                                        row.closest('.recommended-item') ||
+                                        row.closest('[data-testid="enhanced-page-section"]') ||
+                                        row.hasAttribute('data-testid') && row.getAttribute('data-testid').includes('recommendation')) {
+                                        console.log('Skipping recommended track');
+                                        continue;
+                                    }
                                     
-                                    tracks.push(track);
-                                    console.log('Added track:', track.name, 'by', track.artists.join(', '));
+                                    // Check for playlist end marker
+                                    if (row.querySelector('.EndOfPlaylistSection') || 
+                                        row.querySelector('[class*="EndOfPlaylist"]') ||
+                                        row.querySelector('[data-testid="playlist-end-marker"]')) {
+                                        console.log('Reached end of playlist marker');
+                                        break;
+                                    }
+                                    
+                                    // Multiple selectors for track title
+                                    let nameElement = row.querySelector('div[data-testid="internal-track-link"] a');
+                                    if (!nameElement) {
+                                        nameElement = row.querySelector('a[data-testid="internal-track-link"]');
+                                    }
+                                    if (!nameElement) {
+                                        nameElement = row.querySelector('a[aria-label*="play"]');
+                                    }
+                                    
+                                    // Multiple selectors for artist
+                                    let artistElement = row.querySelector('span a');
+                                    if (!artistElement) {
+                                        artistElement = row.querySelector('a[href*="artist"]');
+                                    }
+                                    
+                                    // Multiple selectors for duration
+                                    let durationElement = row.querySelector('div[data-testid="tracklist-duration"]');
+                                    if (!durationElement) {
+                                        durationElement = row.querySelector('div[aria-colindex="5"]');
+                                    }
+                                    
+                                    const name = nameElement ? nameElement.textContent.trim() : 'Unknown Track';
+                                    const artist = artistElement ? artistElement.textContent.trim() : 'Unknown Artist';
+                                    const duration = durationElement ? durationElement.textContent.trim() : '';
+                                    
+                                    // Skip rows that seem to be headers or recommendations
+                                    if (name === 'Title' || name === '#' || name === '' || 
+                                        row.classList.contains('recommended') || 
+                                        row.closest('[data-testid="recommendations-section"]')) {
+                                        console.log('Skipping header or empty track');
+                                        continue;
+                                    }
+                                    
+                                    // Get all artist elements (there might be multiple)
+                                    const artistElements = row.querySelectorAll('span a[href*="artist"]');
+                                    const artists = [];
+                                    
+                                    if (artistElements.length > 0) {
+                                        for (const elem of artistElements) {
+                                            artists.push(elem.textContent.trim());
+                                        }
+                                    } else {
+                                        artists.push(artist);
+                                    }
+                                    
+                                    // Additional validation: skip if no track name or artists
+                                    if (!name || name === 'Unknown Track' || artists.length === 0) {
+                                        console.log('Skipping track with missing data');
+                                        continue;
+                                    }
+                                    
+                                    tracks.push({
+                                        name: name,
+                                        artists: artists,
+                                        duration: duration
+                                    });
+                                } catch (e) {
+                                    console.error('Error extracting track data:', e);
                                 }
-                            } catch (e) {
-                                console.error('Error processing track row:', e);
                             }
-                        });
+                            return tracks;
+                        }
                         
-                        return {
-                            name: playlistName,
-                            tracks: tracks,
-                            total_tracks: tracks.length,
-                            platform: 'spotify',
-                            url: window.location.href
-                        };
+                        // Fallback approach only if needed
+                        return [];
                     }
-                    return getPlaylistData();
+                    
+                    return extractTracks();
                 """)
                 
-                if not playlist_data:
-                    raise Exception("Failed to extract playlist data - no data returned from script")
+                if track_data and len(track_data) > 0:
+                    tracks = track_data
+                    logger.info(f"[TRACE][{search_id}] Successfully extracted {len(tracks)} tracks using JavaScript")
+                else:
+                    # Fallback to manual element extraction if JavaScript approach failed
+                    logger.warning(f"[WARN][{search_id}] JavaScript extraction failed, falling back to manual extraction")
+                    
+                    # Find the main playlist container to exclude recommendations
+                    main_container = None
+                    for selector in ['div[data-testid="playlist-tracklist"]', 'section[data-testid="playlist-tracklist"]']:
+                        try:
+                            main_container = self.browser.find_element(By.CSS_SELECTOR, selector)
+                            if main_container:
+                                logger.info(f"[TRACE][{search_id}] Found main playlist container with selector: {selector}")
+                                break
+                        except:
+                            continue
+                    
+                    if not main_container:
+                        logger.warning(f"[WARN][{search_id}] Could not find main playlist container, using full page")
+                        main_container = self.browser
+                    
+                    # Get track rows only from the main container
+                    track_rows = []
+                    for selector in row_selectors:
+                        try:
+                            rows = main_container.find_elements(By.CSS_SELECTOR, selector)
+                            if rows:
+                                track_rows = rows
+                                logger.info(f"[TRACE][{search_id}] Found {len(rows)} track rows in main container with selector: {selector}")
+                                break
+                        except:
+                            continue
+                    
+                    for i, row in enumerate(track_rows):
+                        try:
+                            # Try multiple selectors for title
+                            title_selectors = [
+                                'div[data-testid="internal-track-link"] a',
+                                'a[data-testid="internal-track-link"]',
+                                'div.tracklist-name'
+                            ]
+                            
+                            track_name = None
+                            for selector in title_selectors:
+                                try:
+                                    element = row.find_element(By.CSS_SELECTOR, selector)
+                                    track_name = element.text.strip()
+                                    if track_name:
+                                        break
+                                except:
+                                    continue
+                            
+                            if not track_name:
+                                logger.warning(f"[WARN][{search_id}] Could not extract name for track {i+1}")
+                                continue
+                            
+                            # Try multiple selectors for artists
+                            artist_elements = []
+                            artist_selectors = [
+                                'span a[href*="artist"]',
+                                'div.tracklist-col.name span a',
+                                'a[href*="/artist/"]'
+                            ]
+                            
+                            for selector in artist_selectors:
+                                try:
+                                    elements = row.find_elements(By.CSS_SELECTOR, selector)
+                                    if elements:
+                                        artist_elements = elements
+                                        break
+                                except:
+                                    continue
+                            
+                            artists = []
+                            for element in artist_elements:
+                                artists.append(element.text.strip())
+                            
+                            if not artists:
+                                logger.warning(f"[WARN][{search_id}] Could not extract artists for track {i+1}")
+                                artists = ["Unknown Artist"]
+                            
+                            # Try multiple selectors for duration
+                            duration = "0:00"
+                            duration_selectors = [
+                                'div[data-testid="tracklist-duration"]',
+                                'div.tracklist-duration span',
+                                'div[aria-colindex="5"]'
+                            ]
+                            
+                            for selector in duration_selectors:
+                                try:
+                                    element = row.find_element(By.CSS_SELECTOR, selector)
+                                    duration = element.text.strip()
+                                    if duration:
+                                        break
+                                except:
+                                    continue
+                            
+                            tracks.append({
+                                "name": track_name,
+                                "artists": artists,
+                                "duration": duration
+                            })
+                            
+                        except Exception as e:
+                            logger.error(f"[ERROR][{search_id}] Error extracting data for track {i+1}: {str(e)}")
                 
-                if not playlist_data.get('tracks'):
-                    raise Exception("Failed to extract playlist data - no tracks found")
+                # Validate track data
+                validated_tracks = []
                 
-                scraping_stats['track_extraction_success'] = True
-                scraping_stats['total_tracks_found'] = len(playlist_data.get('tracks', []))
-                scraping_stats['performance_metrics']['extraction_duration'] = self._serialize_datetime(datetime.now() - extraction_start)
+                # Get the number of tracks displayed in the playlist header if possible
+                expected_track_count = None
+                try:
+                    track_count_elements = self.browser.find_elements(By.CSS_SELECTOR, 
+                        '.main-entityHeader-detailsText, [data-testid="playlist-track-count"]')
+                    for element in track_count_elements:
+                        text = element.text.strip()
+                        # Look for patterns like "3 songs" or "3 tracks"
+                        match = re.search(r'(\d+)\s+(song|track)', text, re.IGNORECASE)
+                        if match:
+                            expected_track_count = int(match.group(1))
+                            logger.info(f"[TRACE][{search_id}] Found expected track count: {expected_track_count}")
+                            break
+                except Exception as e:
+                    logger.warning(f"[WARN][{search_id}] Could not extract expected track count: {str(e)}")
                 
-                # Log success information
-                logger.info(f"[TRACE][{request_id}] Successfully extracted playlist data:")
-                logger.info(f"[TRACE][{request_id}] - Name: {playlist_data.get('name')}")
-                logger.info(f"[TRACE][{request_id}] - Total tracks: {len(playlist_data.get('tracks', []))}")
+                for idx, track in enumerate(tracks):
+                    # Skip tracks without a name
+                    if not track.get("name") or track.get("name") == "Unknown Track":
+                        continue
+                    
+                    # Ensure artists is a list
+                    if isinstance(track.get("artists"), str):
+                        track["artists"] = [track["artists"]]
+                    
+                    # Ensure duration exists
+                    if not track.get("duration"):
+                        track["duration"] = "0:00"
+                    
+                    # Filter out probable recommended tracks
+                    if expected_track_count and idx >= expected_track_count:
+                        logger.info(f"[TRACE][{search_id}] Skipping track at position {idx+1} as it exceeds expected count of {expected_track_count}")
+                        continue
+                        
+                    validated_tracks.append(track)
                 
-                # Log first few tracks for verification
-                for idx, track in enumerate(playlist_data.get('tracks', [])[:3], 1):
-                    logger.info(f"[TRACE][{request_id}] - Track {idx}: {track.get('name')} by {', '.join(track.get('artists', []))}")
+                # Additional validation: if we know the expected count, ensure we don't exceed it
+                if expected_track_count and len(validated_tracks) > expected_track_count:
+                    logger.warning(f"[WARN][{search_id}] Limiting tracks to expected count of {expected_track_count}")
+                    validated_tracks = validated_tracks[:expected_track_count]
                 
-                return playlist_data
+                # Log success
+                logger.info(f"[TRACE][{search_id}] Successfully extracted {len(validated_tracks)} validated tracks")
+                
+                # Return playlist data
+                return {
+                    "platform": "spotify",
+                    "url": url,
+                    "name": playlist_name,
+                    "tracks": validated_tracks
+                }
                 
             except Exception as e:
-                error_msg = f"Failed to extract playlist data: {str(e)}"
-                scraping_stats['errors'].append({
-                    'phase': 'data_extraction',
-                    'error': str(e),
-                    'timestamp': self._serialize_datetime(datetime.now())
-                })
-                logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-                raise
+                error_msg = f"Error extracting Spotify playlist data (attempt {attempt}/{max_attempts}): {str(e)}"
+                logger.error(f"[ERROR][{search_id}] {error_msg}")
                 
-        except Exception as e:
-            error_msg = f"Failed to fetch Spotify playlist data: {str(e)}"
-            logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-            raise
-            
-        finally:
-            # Log final statistics
-            try:
-                end_time = datetime.now()
-                scraping_stats['end_time'] = self._serialize_datetime(end_time)
-                scraping_stats['duration'] = str((end_time - start_time).total_seconds())
+                if attempt == max_attempts:
+                    logger.error(f"[ERROR][{search_id}] All attempts failed for Spotify playlist extraction")
+                    raise Exception(f"Failed to extract Spotify playlist data: {str(e)}")
                 
-                # Convert any remaining datetime objects
-                stats_json = json.dumps(scraping_stats, default=self._serialize_datetime, indent=2)
-                logger.info(f"[TRACE][{request_id}] Scraping statistics: {stats_json}")
-            except Exception as stats_error:
-                logger.error(f"[ERROR][{request_id}] Failed to log scraping statistics: {str(stats_error)}") 
+                await asyncio.sleep(2)  # Wait before retrying
+        
+        raise Exception("Failed to extract Spotify playlist data: Max attempts reached") 

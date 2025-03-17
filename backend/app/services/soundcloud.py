@@ -10,7 +10,6 @@ from difflib import SequenceMatcher
 from urllib.parse import quote
 from datetime import datetime
 import re
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -29,142 +28,22 @@ class SoundCloudService:
             return
 
         try:
-            logger.info("SoundCloud: Starting browser initialization...")
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
-            # For Heroku environment
-            is_heroku = 'DYNO' in os.environ
-            logger.info(f"SoundCloud: Running in Heroku environment: {is_heroku}")
-            
-            if is_heroku:
-                chrome_binary_path = os.environ.get('GOOGLE_CHROME_BIN', '/app/.chrome-for-testing/chrome-linux64/chrome')
-                logger.info(f"SoundCloud: Setting Chrome binary location to: {chrome_binary_path}")
-                chrome_options.binary_location = chrome_binary_path
-                
-                # Verify if binary exists
-                if os.path.exists(chrome_binary_path):
-                    logger.info(f"SoundCloud: Chrome binary found at: {chrome_binary_path}")
-                else:
-                    logger.warning(f"SoundCloud: Chrome binary NOT found at: {chrome_binary_path}")
-            
-            logger.info("SoundCloud: Creating Chrome browser instance...")
-            
-            try:
-                # Use WebDriverManager to handle driver installation
-                from webdriver_manager.chrome import ChromeDriverManager
-                from webdriver_manager.core.os_manager import ChromeType
-                from selenium.webdriver.chrome.service import Service
-                
-                # Setup ChromeDriver differently based on environment
-                if is_heroku:
-                    chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH', '/app/.chrome-for-testing/chromedriver-linux64/chromedriver')
-                    logger.info(f"SoundCloud: Using ChromeDriver at: {chrome_driver_path}")
-                    
-                    # Verify if chromedriver exists
-                    if os.path.exists(chrome_driver_path):
-                        logger.info(f"SoundCloud: ChromeDriver found at: {chrome_driver_path}")
-                        # Check if executable
-                        if os.access(chrome_driver_path, os.X_OK):
-                            logger.info("SoundCloud: ChromeDriver is executable")
-                        else:
-                            logger.warning("SoundCloud: ChromeDriver exists but is not executable")
-                            try:
-                                os.chmod(chrome_driver_path, 0o755)
-                                logger.info("SoundCloud: Made ChromeDriver executable")
-                            except Exception as chmod_error:
-                                logger.error(f"SoundCloud: Failed to make ChromeDriver executable: {str(chmod_error)}")
-                    else:
-                        logger.warning(f"SoundCloud: ChromeDriver NOT found at: {chrome_driver_path}")
-                        # Try to list directory contents
-                        try:
-                            heroku_bin_dir = os.path.dirname(chrome_driver_path)
-                            if os.path.exists(heroku_bin_dir):
-                                files = os.listdir(heroku_bin_dir)
-                                logger.info(f"SoundCloud: Files in {heroku_bin_dir}: {files}")
-                            else:
-                                logger.warning(f"SoundCloud: Directory {heroku_bin_dir} does not exist")
-                                
-                                # Try to list root directories to find chromedriver
-                                logger.info("SoundCloud: Searching for chromedriver in common locations...")
-                                for search_dir in ['/app', '/usr/local/bin', '/usr/bin']:
-                                    if os.path.exists(search_dir):
-                                        logger.info(f"SoundCloud: Listing {search_dir}...")
-                                        try:
-                                            dir_files = os.listdir(search_dir)
-                                            logger.info(f"SoundCloud: Files in {search_dir}: {dir_files[:10]}...")
-                                            
-                                            # Search recursively for chromedriver
-                                            for root, dirs, files in os.walk(search_dir, topdown=True, followlinks=False):
-                                                if 'chromedriver' in files:
-                                                    found_path = os.path.join(root, 'chromedriver')
-                                                    logger.info(f"SoundCloud: Found chromedriver at: {found_path}")
-                                                    chrome_driver_path = found_path
-                                                    break
-                                                # Limit depth
-                                                if root.count(os.sep) - search_dir.count(os.sep) > 2:
-                                                    dirs.clear()
-                                        except Exception as list_error:
-                                            logger.error(f"SoundCloud: Error listing {search_dir}: {str(list_error)}")
-                        except Exception as dir_error:
-                            logger.error(f"SoundCloud: Error searching directories: {str(dir_error)}")
-                    
-                    try:
-                        logger.info(f"SoundCloud: Attempting to create Chrome browser with Service({chrome_driver_path})")
-                        service = Service(executable_path=chrome_driver_path)
-                        self.browser = webdriver.Chrome(service=service, options=chrome_options)
-                        logger.info("SoundCloud: Successfully created Chrome browser with Service object")
-                    except Exception as service_error:
-                        logger.error(f"SoundCloud: Failed to create browser with Service: {str(service_error)}")
-                        # Try alternate method
-                        logger.info("SoundCloud: Trying alternative method for Heroku...")
-                        try:
-                            logger.info("SoundCloud: Setting Chrome binary path directly...")
-                            chrome_options.add_argument(f"--webdriver-path={chrome_driver_path}")
-                            self.browser = webdriver.Chrome(options=chrome_options)
-                            logger.info("SoundCloud: Successfully created Chrome browser with direct options")
-                        except Exception as alt_error:
-                            logger.error(f"SoundCloud: Alternative method failed: {str(alt_error)}")
-                            raise
-                else:
-                    # Local development
-                    logger.info("SoundCloud: Using WebDriverManager for local development")
-                    try:
-                        # Try with ChromeDriverManager
-                        driver_path = ChromeDriverManager().install()
-                        logger.info(f"SoundCloud: WebDriverManager installed driver at: {driver_path}")
-                        service = Service(driver_path)
-                        self.browser = webdriver.Chrome(service=service, options=chrome_options)
-                        logger.info("SoundCloud: Successfully created Chrome browser with WebDriverManager")
-                    except Exception as wdm_error:
-                        logger.error(f"SoundCloud: WebDriverManager failed: {str(wdm_error)}")
-                        # Try to find chromedriver in PATH
-                        logger.info("SoundCloud: Trying to find chromedriver in PATH...")
-                        self.browser = webdriver.Chrome(options=chrome_options)
-                        logger.info("SoundCloud: Successfully created Chrome browser from PATH")
-            except ImportError as import_err:
-                logger.error(f"SoundCloud: ImportError with WebDriverManager: {str(import_err)}")
-                # Fallback to direct Chrome initialization
-                logger.info("SoundCloud: Falling back to direct Chrome initialization...")
-                self.browser = webdriver.Chrome(options=chrome_options)
-                logger.info("SoundCloud: Successfully created Chrome browser with direct initialization")
-            
+            self.browser = webdriver.Chrome(options=chrome_options)
             self.browser.implicitly_wait(10)
             self._initialized = True
             logger.info("SoundCloud browser initialized successfully")
         except Exception as e:
-            error_msg = f"Failed to initialize SoundCloud browser: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            # Log system PATH
-            logger.info(f"SoundCloud: System PATH: {os.environ.get('PATH', 'Not available')}")
+            logger.error(f"Failed to initialize SoundCloud browser: {str(e)}")
             if self.browser:
                 await self.cleanup()
-            raise Exception(error_msg)
+            raise
 
     async def cleanup(self):
         """Clean up browser resources."""
@@ -244,38 +123,65 @@ class SoundCloudService:
                 return None
 
         try:
-            # Generate optimized search queries
+            # Clean and normalize inputs
+            original_track_name = track_name
+            track_name = self._clean_input(track_name)
+            
+            artist_names = []
+            if artist_name:
+                original_artist_name = artist_name
+                artist_name = self._clean_input(artist_name)
+                # Split artist name by various separators
+                artist_names = [a.strip() for a in re.split(r'[,&/]', artist_name) if a.strip()]
+                # Add the full artist name as well
+                if artist_name not in artist_names:
+                    artist_names.append(artist_name)
+                
+                # Add versions without special characters
+                normalized_artist_names = [re.sub(r'[^\w\s]', '', a).strip() for a in artist_names]
+                artist_names.extend([a for a in normalized_artist_names if a and a not in artist_names])
+            
+            # Generate optimized search queries in order of specificity
             search_queries = []
             
-            # Clean and normalize track name and artist name
-            track_name = track_name.strip()
-            if artist_name:
-                artist_name = artist_name.strip()
-                # Split artist name if it contains commas or '&'
-                artist_names = [a.strip() for a in re.split(r'[,&]', artist_name)]
-            
-            # 1. Most specific search with quotes
-            if artist_name:
+            # 1. Most specific exact match search (in quotes)
+            if artist_names:
                 for artist in artist_names:
+                    # Try with quotes around both
                     search_queries.append(f'"{track_name}" "{artist}"')
+                    
+            # 2. Exact track name with artist
+            if artist_names:
+                for artist in artist_names:
+                    search_queries.append(f'"{track_name}" {artist}')
             
-            # 2. Track name with each artist variation
-            if artist_name:
+            # 3. Track name with each artist
+            if artist_names:
                 for artist in artist_names:
                     search_queries.append(f'{track_name} {artist}')
             
-            # 3. Track name in quotes
+            # 4. Just the track name in quotes
             search_queries.append(f'"{track_name}"')
             
-            # 4. Track name as is
+            # 5. Just the track name
             search_queries.append(track_name)
             
-            # 5. Remove special characters from track name
-            clean_track_name = re.sub(r'[^\w\s]', ' ', track_name)
-            search_queries.append(clean_track_name)
+            # 6. Track name without special characters
+            clean_track_name = re.sub(r'[^\w\s]', ' ', track_name).strip()
+            if clean_track_name and clean_track_name != track_name:
+                search_queries.append(clean_track_name)
+            
+            # 7. For tracks with brackets or parentheses, try searching without them
+            simplified_track_name = re.sub(r'[\(\[\{].*?[\)\]\}]', '', track_name).strip()
+            if simplified_track_name and simplified_track_name != track_name and len(simplified_track_name) > 3:
+                search_queries.append(simplified_track_name)
+            
+            # Remove duplicates while preserving order
+            search_queries = list(dict.fromkeys(search_queries))
             
             best_match = None
             highest_similarity = 0
+            all_results = []  # Keep track of all results for final evaluation
             
             for search_query in search_queries:
                 try:
@@ -285,14 +191,16 @@ class SoundCloudService:
                     logger.info(f"[TRACE][{search_id}] Trying search query: '{search_query}'")
                     
                     self.browser.get(search_url)
-                    # Wait longer for initial page load
+                    # Wait for initial page load
                     await asyncio.sleep(2)
                     
                     # Wait for search results with multiple selectors
                     selectors = [
                         'ul.sc-list-nostyle',
                         'div[role="main"] ul',
-                        'div.searchList__results'
+                        'div.searchList__results',
+                        'div.sound__body',
+                        'div.searchList'
                     ]
                     
                     results_found = False
@@ -302,6 +210,7 @@ class SoundCloudService:
                                 EC.presence_of_element_located((By.CSS_SELECTOR, selector))
                             )
                             results_found = True
+                            logger.info(f"[TRACE][{search_id}] Results found with selector: {selector}")
                             break
                         except TimeoutException:
                             continue
@@ -311,8 +220,17 @@ class SoundCloudService:
                         continue
                     
                     # Scroll down to load more results
-                    self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    await asyncio.sleep(1)
+                    for _ in range(2):  # Scroll multiple times to load more results
+                        self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        await asyncio.sleep(1)
+                    
+                    # Take screenshot for debugging if needed
+                    screenshot_path = f"search_results_{search_id}_{search_queries.index(search_query)}.png"
+                    try:
+                        self.browser.save_screenshot(screenshot_path)
+                        logger.info(f"[TRACE][{search_id}] Saved screenshot to {screenshot_path}")
+                    except Exception as e:
+                        logger.warning(f"[WARN][{search_id}] Failed to save screenshot: {str(e)}")
                     
                     # Extract track information with improved selectors
                     track_data = self.browser.execute_script("""
@@ -321,27 +239,54 @@ class SoundCloudService:
                             const selectors = [
                                 'ul.sc-list-nostyle li',
                                 'div[role="main"] ul li',
-                                'div.searchList__results div.sound__content'
+                                'div.searchList__results div.sound__content',
+                                'div.searchList li',
+                                'div.sound'
                             ];
                             
                             for (const selector of selectors) {
                                 const items = document.querySelectorAll(selector);
+                                console.log(`Found ${items.length} items with selector ${selector}`);
+                                
                                 if (items.length > 0) {
                                     for (const item of items) {
                                         try {
-                                            // Multiple selectors for title and user
-                                            const titleElement = item.querySelector(
-                                                'a[href*="/track/"], ' +
-                                                'a.sc-link-primary, ' +
-                                                'a.soundTitle__title, ' +
-                                                'a[href*="soundcloud.com"][title]'
-                                            );
+                                            // Multiple selectors for title
+                                            const titleSelectors = [
+                                                'a[href*="/track/"]',
+                                                'a.sc-link-primary',
+                                                'a.soundTitle__title',
+                                                'a[href*="soundcloud.com"][title]',
+                                                'a.soundTitle__titleLink',
+                                                'h2 a'
+                                            ];
                                             
-                                            const userElement = item.querySelector(
-                                                'a.sc-link-secondary[href*="/"], ' +
-                                                'a.soundTitle__username, ' +
-                                                'a[href*="soundcloud.com/"][class*="user"]'
-                                            );
+                                            // Multiple selectors for user
+                                            const userSelectors = [
+                                                'a.sc-link-secondary[href*="/"]',
+                                                'a.soundTitle__username',
+                                                'a[href*="soundcloud.com/"][class*="user"]',
+                                                'div.soundTitle__usernameText a',
+                                                'span.soundTitle__username a'
+                                            ];
+                                            
+                                            let titleElement = null;
+                                            for (const ts of titleSelectors) {
+                                                const el = item.querySelector(ts);
+                                                if (el) {
+                                                    titleElement = el;
+                                                    break;
+                                                }
+                                            }
+                                            
+                                            let userElement = null;
+                                            for (const us of userSelectors) {
+                                                const el = item.querySelector(us);
+                                                if (el) {
+                                                    userElement = el;
+                                                    break;
+                                                }
+                                            }
                                             
                                             if (titleElement && userElement) {
                                                 const track = {
@@ -354,20 +299,31 @@ class SoundCloudService:
                                                 };
                                                 
                                                 // Add duration if available
-                                                const durationElement = item.querySelector('span[aria-label*="Duration"], span.duration');
-                                                if (durationElement) {
-                                                    track.duration = durationElement.textContent.trim();
+                                                const durationSelectors = [
+                                                    'span[aria-label*="Duration"]',
+                                                    'span.duration',
+                                                    'span[class*="duration"]',
+                                                    'span[class*="time"]'
+                                                ];
+                                                
+                                                for (const ds of durationSelectors) {
+                                                    const durationElement = item.querySelector(ds);
+                                                    if (durationElement) {
+                                                        track.duration = durationElement.textContent.trim();
+                                                        break;
+                                                    }
                                                 }
                                                 
-                                                tracks.push(track);
+                                                // Only add if we don't already have this URL
+                                                const exists = tracks.some(t => t.url === track.url);
+                                                if (!exists) {
+                                                    tracks.push(track);
+                                                }
                                             }
                                         } catch (e) {
                                             console.error('Error processing track:', e);
                                         }
                                     }
-                                    
-                                    // If we found tracks with this selector, no need to try others
-                                    if (tracks.length > 0) break;
                                 }
                             }
                             
@@ -377,46 +333,62 @@ class SoundCloudService:
                     """)
                     
                     if not track_data:
+                        logger.warning(f"[WARN][{search_id}] No track data extracted for query: {search_query}")
                         continue
                     
-                    # Find best match with improved comparison
+                    logger.info(f"[TRACE][{search_id}] Found {len(track_data)} tracks for query: {search_query}")
+                    
+                    # Store all results for later analysis
+                    for track in track_data:
+                        if not (blacklisted_urls and track['url'] in blacklisted_urls):
+                            if not any(r['url'] == track['url'] for r in all_results):
+                                all_results.append(track)
+                    
+                    # Find best match in this batch
                     for track in track_data:
                         # Skip blacklisted URLs
                         if blacklisted_urls and track['url'] in blacklisted_urls:
                             logger.info(f"[TRACE][{search_id}] Skipping blacklisted track: {track['url']}")
                             continue
                         
-                        # Quick exact match check first
-                        if track['title'].lower() == track_name.lower():
+                        # Quick exact match check first (case insensitive)
+                        track_title_lower = track['title'].lower()
+                        if track_title_lower == track_name.lower() or track_title_lower == original_track_name.lower():
                             if artist_name:
+                                track_artist_lower = track['user']['username'].lower()
                                 # Check if any artist name variation matches
-                                for artist in artist_names:
-                                    if track['user']['username'].lower() == artist.lower():
-                                        return track
+                                if any(artist.lower() == track_artist_lower for artist in artist_names):
+                                    logger.info(f"[TRACE][{search_id}] Found exact match: {track['title']} by {track['user']['username']}")
+                                    return track
                             else:
+                                logger.info(f"[TRACE][{search_id}] Found exact match: {track['title']}")
                                 return track
                         
-                        # Calculate similarity with improved matching
-                        title_similarity = self._calculate_similarity(track_name, track['title'])
+                        # Calculate similarity scores
+                        title_similarity = max(
+                            self._calculate_similarity(track_name, track['title']),
+                            self._calculate_similarity(original_track_name, track['title'])
+                        )
                         
                         # Calculate artist similarity if artist name is provided
                         artist_similarity = 0
                         if artist_name:
+                            track_artist = track['user']['username']
                             # Check similarity against all artist name variations
                             artist_similarities = [
-                                self._calculate_similarity(artist, track['user']['username'])
+                                self._calculate_similarity(artist, track_artist)
                                 for artist in artist_names
                             ]
                             artist_similarity = max(artist_similarities)
                         else:
                             artist_similarity = 1.0  # Don't penalize if no artist name provided
                         
-                        # Weighted similarity calculation
-                        combined_similarity = (title_similarity * 0.7) + (artist_similarity * 0.3)
+                        # Weighted similarity calculation with more weight on title
+                        combined_similarity = (title_similarity * 0.75) + (artist_similarity * 0.25)
                         
                         # Additional boost for partial matches
-                        if track_name.lower() in track['title'].lower():
-                            combined_similarity = min(1.0, combined_similarity + 0.1)
+                        if track_name.lower() in track_title_lower or original_track_name.lower() in track_title_lower:
+                            combined_similarity = min(1.0, combined_similarity + 0.15)
                         
                         if artist_name and any(artist.lower() in track['user']['username'].lower() for artist in artist_names):
                             combined_similarity = min(1.0, combined_similarity + 0.1)
@@ -425,6 +397,7 @@ class SoundCloudService:
                             highest_similarity = combined_similarity
                             best_match = track
                             search_stats['best_match_similarity'] = highest_similarity
+                            logger.info(f"[TRACE][{search_id}] New best match: {track['title']} ({combined_similarity:.2f})")
                         
                         # Return immediately if we found a very good match
                         if highest_similarity > 0.9:
@@ -433,15 +406,63 @@ class SoundCloudService:
                     
                     # Break search if we found a good enough match
                     if highest_similarity > 0.8:
+                        logger.info(f"[TRACE][{search_id}] Breaking search early - found good match: {best_match['title']} ({highest_similarity:.2f})")
                         break
                         
                 except Exception as e:
                     logger.error(f"[ERROR][{search_id}] Error with search query '{search_query}': {str(e)}")
+                    search_stats['errors'].append({'phase': 'search_query', 'error': str(e)})
                     continue
+            
+            # If we didn't find a good match from individual searches, analyze all results together
+            if (not best_match or highest_similarity <= 0.7) and all_results:
+                logger.info(f"[TRACE][{search_id}] Analyzing all {len(all_results)} results together")
+                
+                # Re-analyze all collected results with more sophisticated matching
+                for track in all_results:
+                    # Skip if already checked or blacklisted
+                    if blacklisted_urls and track['url'] in blacklisted_urls:
+                        continue
+                    
+                    # Calculate fuzzy token similarity for titles
+                    title_tokens_similarity = self._token_similarity(track_name, track['title'])
+                    original_title_tokens_similarity = self._token_similarity(original_track_name, track['title'])
+                    title_similarity = max(title_tokens_similarity, original_title_tokens_similarity)
+                    
+                    # Calculate artist similarity
+                    artist_similarity = 0
+                    if artist_name:
+                        track_artist = track['user']['username']
+                        # Calculate token similarity for artists
+                        artist_similarities = [
+                            self._token_similarity(artist, track_artist)
+                            for artist in artist_names
+                        ]
+                        artist_similarity = max(artist_similarities)
+                    else:
+                        artist_similarity = 1.0
+                    
+                    # Weighted similarity with more sophisticated calculation
+                    combined_similarity = (title_similarity * 0.75) + (artist_similarity * 0.25)
+                    
+                    # Special boost for exact word matches
+                    track_title_words = set(re.findall(r'\w+', track['title'].lower()))
+                    search_words = set(re.findall(r'\w+', track_name.lower()))
+                    
+                    # Calculate word overlap
+                    if search_words:
+                        word_overlap = len(track_title_words.intersection(search_words)) / len(search_words)
+                        combined_similarity = min(1.0, combined_similarity + (word_overlap * 0.2))
+                    
+                    if combined_similarity > highest_similarity:
+                        highest_similarity = combined_similarity
+                        best_match = track
+                        search_stats['best_match_similarity'] = highest_similarity
+                        logger.info(f"[TRACE][{search_id}] New best match from all results: {track['title']} ({combined_similarity:.2f})")
             
             # Return best match if it's good enough
             if best_match and highest_similarity > 0.5:
-                logger.info(f"[TRACE][{search_id}] Found best match with similarity {highest_similarity:.2f}: '{best_match['title']}' by {best_match['user']['username']}")
+                logger.info(f"[TRACE][{search_id}] Final best match with similarity {highest_similarity:.2f}: '{best_match['title']}' by {best_match['user']['username']}")
                 return best_match
             else:
                 logger.warning(f"[WARN][{search_id}] No suitable match found. Best similarity: {highest_similarity:.2f}")
@@ -456,6 +477,36 @@ class SoundCloudService:
             search_stats['end_time'] = datetime.now()
             search_stats['duration'] = (search_stats['end_time'] - search_stats['start_time']).total_seconds()
             logger.info(f"[TRACE][{search_id}] Search completed. Stats: {search_stats}")
+
+    def _clean_input(self, text: str) -> str:
+        """Clean input text for better matching."""
+        if not text:
+            return ""
+        # Remove emojis
+        text = text.encode('ascii', 'ignore').decode('ascii')
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        # Remove special characters at beginning/end
+        text = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', text).strip()
+        return text
+        
+    def _token_similarity(self, str1: str, str2: str) -> float:
+        """Calculate token-based similarity between strings."""
+        if not str1 or not str2:
+            return 0.0
+            
+        # Convert to lowercase and tokenize
+        tokens1 = set(re.findall(r'\w+', str1.lower()))
+        tokens2 = set(re.findall(r'\w+', str2.lower()))
+        
+        # Calculate Jaccard similarity
+        if not tokens1 or not tokens2:
+            return 0.0
+            
+        intersection = len(tokens1.intersection(tokens2))
+        union = len(tokens1.union(tokens2))
+        
+        return intersection / union if union > 0 else 0.0
 
     def search_tracks(self, query: str) -> List[Dict]:
         """Search for tracks on SoundCloud."""

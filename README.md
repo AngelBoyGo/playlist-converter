@@ -1,97 +1,82 @@
 # Playlist Converter
 
-A web application that converts playlists between different music streaming platforms (currently supporting Apple Music and Spotify to SoundCloud).
+Convert playlists between music streaming platforms (Spotify, Apple Music, SoundCloud).
 
 ## Features
 
-- Convert Apple Music playlists to SoundCloud
-- Convert Spotify playlists to SoundCloud
-- Interactive web interface
-- Real-time conversion progress
-- Track matching verification
+- Extract tracks from Spotify and Apple Music playlists
+- Find matching tracks on SoundCloud
+- Preview tracks with SoundCloud embedded player
+- Batch processing for large playlists
+- Wrong match reporting with alternatives
+- Detailed progress tracking
 
-## Local Development Setup
+## Tech Stack
 
-1. Clone the repository:
+- **Backend**: Python 3.9, FastAPI, Selenium
+- **Frontend**: React, TypeScript, Tailwind CSS
+- **Deployment**: Docker, Render
+
+## Local Development
+
+### Prerequisites
+
+- Python 3.9+
+- Node.js 16+
+- Chrome/Chromium browser
+
+### Backend Setup
+
 ```bash
+# Clone the repository
 git clone https://github.com/yourusername/playlist-converter.git
 cd playlist-converter
-```
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-4. Copy `.env.example` to `.env` and configure your environment variables:
-```bash
-cp .env.example .env
-```
-
-5. Run the development server:
-```bash
+# Start the backend server
 python start_server.py
 ```
 
-## Deployment to Heroku
+### Frontend Setup
 
-1. Install the [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli)
-
-2. Login to Heroku:
 ```bash
-heroku login
+# Navigate to frontend directory
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
 ```
 
-3. Create a new Heroku app:
-```bash
-heroku create your-app-name
-```
+### Access the Application
 
-4. Add the Chrome buildpack:
-```bash
-heroku buildpacks:add https://github.com/heroku/heroku-buildpack-google-chrome
-heroku buildpacks:add https://github.com/heroku/heroku-buildpack-chromedriver
-heroku buildpacks:add heroku/python
-```
+Open your browser and navigate to http://localhost:8080
 
-5. Configure environment variables:
-```bash
-heroku config:set CHROME_BINARY_LOCATION=/app/.apt/usr/bin/google-chrome
-heroku config:set ENVIRONMENT=production
-```
+## Deployment
 
-6. Deploy the application:
-```bash
-git push heroku main
-```
+This application is configured for easy deployment on Render:
 
-7. Open the application:
-```bash
-heroku open
-```
+1. Fork this repository
+2. Connect your Render account to GitHub
+3. Create a new Web Service in Render
+4. Select this repository
+5. Choose "Docker" as the environment
+6. Choose the free instance type
+7. Click "Create Web Service"
 
-## Production Considerations
+## Usage
 
-- Set up monitoring and error tracking (e.g., Sentry)
-- Configure rate limiting
-- Add SSL certificate
-- Set up a custom domain
-- Monitor server resources
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+1. Enter a Spotify or Apple Music playlist URL
+2. Select batch size (5, 10, 20, or 50 tracks)
+3. Click "Convert Playlist"
+4. Browse and preview the converted tracks
+5. Use "Wrong Match" for incorrect matches
+6. Enjoy your converted playlist on SoundCloud!
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+MIT 
