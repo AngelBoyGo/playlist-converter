@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Music, Loader2, AlertCircle, RefreshCw, ThumbsDown } from 'lucide-react';
-import { ConversionResponse, Track, BATCH_SIZES, BatchSize, Alternative } from './types';
+import React, { useState, useEffect } from 'react';
+import { Music, Loader2, AlertCircle, RefreshCw, ThumbsDown, Clock } from 'lucide-react';
+import { ConversionResponse, Track, BATCH_SIZES, BatchSize, Alternative, BatchInfo } from './types';
 import { convertPlaylist, searchAlternative } from './api';
+import { Toaster, toast } from 'react-hot-toast';
 
 interface TrackPlayerProps {
   track: Track;
@@ -26,73 +27,130 @@ const TrackPlayer: React.FC<TrackPlayerProps> = ({ track }) => {
 
 function App() {
   const [url, setUrl] = useState('');
-  const [batchSize, setBatchSize] = useState<BatchSize>(10);
-  const [isLoading, setIsLoading] = useState(false);
+  const [batchSize, setBatchSize] = useState<BatchSize>(5);
+  const [loading, setLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState('');
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ConversionResponse | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState<Record<number, boolean>>({});
   const [alternatives, setAlternatives] = useState<Record<number, Alternative[]>>({});
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [rateLimited, setRateLimited] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    
+    if (!url) {
+      toast.error('Please enter a playlist URL');
+      return;
+    }
+    
+    setLoading(true);
+    setLoadingStatus('Initializing...');
     setError(null);
-    setAlternatives({});
-
+    setResult(null);
+    setRateLimited(false);
+    
     try {
+      setLoadingStatus('Fetching playlist data...');
+      
       const response = await convertPlaylist({
         url,
         target_platform: 'soundcloud',
-        start_index: 0,
         batch_size: batchSize,
+        start_index: 0
       });
       
       if (!response.success) {
-        throw new Error(response.message || 'Conversion failed');
+        throw new Error(response.message || 'Failed to convert playlist');
+      }
+      
+      if (response.details?.current_batch?.rate_limited) {
+        setRateLimited(true);
       }
       
       setResult(response);
-    } catch (err) {
-      console.error('Error during conversion:', err);
-      let errorMessage = 'An unexpected error occurred';
       
-      if (err instanceof Error) {
-        errorMessage = err.message;
+      // Show success or partial success toast
+      if (response.success_count > 0) {
+        if (response.failure_count > 0) {
+          toast.success(`Found ${response.success_count} of ${response.success_count + response.failure_count} tracks`);
+        } else {
+          toast.success('All tracks were found successfully!');
+        }
+      } else if (response.failure_count > 0) {
+        toast.error(`Couldn't find any of the ${response.failure_count} tracks`);
       }
       
-      // Look for specific browser initialization errors
-      if (errorMessage.includes('browser') || errorMessage.includes('ChromeDriver')) {
-        errorMessage = 'Browser initialization failed. There may be a compatibility issue with ChromeDriver. Please try again later or contact support.';
+    } catch (err: any) {
+      console.error('Error during conversion:', err);
+      
+      // Improved error messages
+      let errorMessage = err.message || 'An unexpected error occurred';
+      
+      // Check for specific error messages and provide better feedback
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timed out')) {
+        errorMessage = 'The request timed out. This could be due to slow internet or the server being busy. Please try again later.';
+      } else if (errorMessage.includes('rate limit') || errorMessage.includes('too many requests')) {
+        errorMessage = 'You\'ve reached the rate limit. Please wait a few minutes before trying again.';
+        setRateLimited(true);
       }
       
       setError(errorMessage);
+      toast.error('Conversion failed');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+      setLoadingStatus('');
     }
   };
 
   const loadMoreTracks = async () => {
-    if (!result) return;
+    if (!result || !result.details.current_batch) return;
     
     setIsLoadingMore(true);
+    setRateLimited(false);
+    
     try {
-      const nextBatch = await convertPlaylist({
+      const nextIndex = result.details.current_batch.end_index || result.details.current_batch.end + 1;
+      
+      const response = await convertPlaylist({
         url,
         target_platform: 'soundcloud',
-        start_index: result.details.current_batch.end,
         batch_size: batchSize,
+        start_index: nextIndex
       });
       
-      setResult({
-        ...nextBatch,
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to load more tracks');
+      }
+      
+      if (response.details?.current_batch?.rate_limited) {
+        setRateLimited(true);
+      }
+      
+      // Merge results
+      const updatedResult = {
+        ...result,
+        success_count: result.success_count + response.success_count,
+        failure_count: result.failure_count + response.failure_count,
+        results: [
+          ...(result.results || []), 
+          ...(response.results || [])
+        ],
         details: {
-          ...nextBatch.details,
-          tracks: [...result.details.tracks, ...nextBatch.details.tracks],
-        },
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load more tracks');
+          ...result.details,
+          tracks: [...result.details.tracks, ...response.details.tracks],
+          current_batch: response.details.current_batch,
+          converted_tracks: result.details.converted_tracks + response.details.converted_tracks,
+        }
+      };
+      
+      setResult(updatedResult);
+      
+    } catch (err: any) {
+      console.error('Error loading more tracks:', err);
+      toast.error('Failed to load more tracks');
     } finally {
       setIsLoadingMore(false);
     }
@@ -115,8 +173,29 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (result?.details?.current_batch) {
+      const { current_batch, total_batches, estimated_completion_time } = result.details.current_batch;
+      
+      if (current_batch !== undefined && total_batches !== undefined) {
+        let progressText = `Batch ${current_batch} of ${total_batches}`;
+        
+        if (estimated_completion_time) {
+          progressText += ` (${estimated_completion_time} remaining)`;
+        }
+        
+        setBatchProgress(progressText);
+      } else {
+        setBatchProgress(null);
+      }
+    } else {
+      setBatchProgress(null);
+    }
+  }, [result?.details?.current_batch]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-50">
+      <Toaster position="top-center" />
       <div className="container mx-auto px-4 py-12">
         <div className="max-w-3xl mx-auto">
           {/* Header */}
@@ -146,6 +225,7 @@ function App() {
                 placeholder="Enter Spotify or Apple Music playlist URL"
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 required
+                disabled={loading}
               />
             </div>
 
@@ -158,6 +238,7 @@ function App() {
                 value={batchSize}
                 onChange={(e) => setBatchSize(Number(e.target.value) as BatchSize)}
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                disabled={loading}
               >
                 {BATCH_SIZES.map((size) => (
                   <option key={size} value={size}>
@@ -169,13 +250,13 @@ function App() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={loading || !url}
               className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {isLoading ? (
+              {loading ? (
                 <span className="flex items-center justify-center">
                   <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Converting...
+                  {loadingStatus || 'Converting...'}
                 </span>
               ) : (
                 'Convert Playlist'
@@ -289,7 +370,9 @@ function App() {
                         )}
 
                         {!track.success && track.error && (
-                          <p className="text-sm text-red-600 mt-2">{track.error}</p>
+                          <p className="text-sm text-red-600 mt-2">
+                            {track.error.includes('timeout') ? 'Search timed out. SoundCloud may be busy.' : track.error}
+                          </p>
                         )}
 
                         {/* Alternatives Section */}
@@ -331,13 +414,18 @@ function App() {
                 {result.details.current_batch.has_more && (
                   <button
                     onClick={loadMoreTracks}
-                    disabled={isLoadingMore}
+                    disabled={isLoadingMore || rateLimited}
                     className="mt-6 w-full bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                   >
                     {isLoadingMore ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin mr-2" />
                         Loading more...
+                      </>
+                    ) : rateLimited ? (
+                      <>
+                        <Clock className="w-5 h-5 mr-2" />
+                        Rate limited - wait a moment
                       </>
                     ) : (
                       'Load More Tracks'

@@ -28,16 +28,13 @@ export interface ConversionResponse {
   message: string;
   success_count: number;
   failure_count: number;
+  results?: any[];
   details: {
     converted_tracks: number;
     total_tracks: number;
     success_rate: number;
     tracks: Track[];
-    current_batch: {
-      start: number;
-      end: number;
-      has_more: boolean;
-    };
+    current_batch: BatchInfo;
   };
 }
 
@@ -57,3 +54,14 @@ export interface Alternative {
 
 export const BATCH_SIZES = [5, 10, 20, 50] as const;
 export type BatchSize = typeof BATCH_SIZES[number];
+
+export interface BatchInfo {
+  start: number;
+  end: number;
+  end_index: number;
+  has_more: boolean;
+  current_batch?: number;
+  total_batches?: number;
+  estimated_completion_time?: string;
+  rate_limited?: boolean;
+}
