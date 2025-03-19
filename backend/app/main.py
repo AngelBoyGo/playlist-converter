@@ -13,9 +13,11 @@ from app.services.playlist_scraper import PlaylistScraper
 from app.services.soundcloud import SoundCloudService
 import re
 import time
+import uuid
 from fastapi import BackgroundTasks, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.exceptions import HTTPException
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +80,33 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+# Helper functions
+def get_request_id():
+    """Generate a unique ID for each request."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
+
+@asynccontextmanager
+async def timeout_context(seconds: int):
+    """Context manager for handling timeouts in async functions."""
+    try:
+        yield
+    except asyncio.TimeoutError:
+        raise asyncio.TimeoutError(f"Operation timed out after {seconds} seconds")
+
+def is_valid_url(url: str) -> bool:
+    """Validate if the URL has a proper format."""
+    if not url:
+        return False
+    url_pattern = re.compile(
+        r'^(?:http|https)://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain
+        r'localhost|'  # localhost
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE
+    )
+    return bool(url_pattern.match(url))
 
 # Create API router with /api prefix
 api_router = APIRouter(prefix="/api")
@@ -192,6 +221,26 @@ async def convert_playlist(
             detailed_status="Initializing conversion services..."
         )
     )
+    
+    # Initialize results arrays
+    results = []
+    converted_tracks = []
+    
+    # Initialize conversion stats
+    conversion_stats = {
+        'start_time': datetime.now(),
+        'tracks_processed': 0,
+        'search_attempts': 0,
+        'search_successes': 0,
+        'perf_stats': {
+            'scraper_init_time': 0.0,
+            'sc_init_time': 0.0,
+            'playlist_fetch_time': 0.0,
+            'search_times': [],
+            'total_search_time': 0.0,
+            'avg_search_time': 0.0
+        }
+    }
     
     logger.info(f"[TRACE][{request_id}] Received conversion request for URL: {request.url}")
     
