@@ -69,10 +69,7 @@ class PlaylistScraper:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # CRITICAL FIX: Use webdriver-manager without ChromeType
-            from selenium import webdriver
-            from selenium.webdriver.chrome.service import Service
-            
+            # Configure Chrome options
             chrome_options = webdriver.ChromeOptions()
             
             # Check if headless mode is enabled via environment variable
@@ -86,34 +83,18 @@ class PlaylistScraper:
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             
-            logger.info("Installing ChromeDriver that matches the installed Chrome version...")
+            # CRITICAL FIX: Skip webdriver-manager and use selenium-manager directly
+            # This avoids the THIRD_PARTY_NOTICES file issue with webdriver-manager
+            logger.info("Using Selenium Manager to find correct ChromeDriver...")
             
-            try:
-                # Attempt to install matching ChromeDriver using webdriver-manager
-                # Use basic ChromeDriverManager without ChromeType
-                driver_path = ChromeDriverManager().install()
-                logger.info(f"Using ChromeDriver from: {driver_path}")
-                service = Service(executable_path=driver_path)
-                
-                # Create WebDriver with the correct driver
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
-                logger.info("Successfully initialized Chrome browser with matching ChromeDriver")
-            except Exception as e:
-                logger.error(f"Failed to install matching ChromeDriver: {str(e)}", exc_info=True)
-                
-                # Fallback: Try to use existing ChromeDriver
-                try:
-                    logger.info("Fallback: Using existing ChromeDriver...")
-                    self.browser = webdriver.Chrome(options=chrome_options)
-                    logger.info("Successfully initialized Chrome browser with existing ChromeDriver")
-                except Exception as fallback_e:
-                    logger.error(f"Fallback failed: {str(fallback_e)}", exc_info=True)
-                    raise
+            # Create WebDriver directly using Selenium Manager (built into Selenium 4)
+            self.browser = webdriver.Chrome(options=chrome_options)
+            logger.info("Successfully initialized Chrome browser with Selenium Manager")
             
-            # Set basic timeouts
+            # Set basic timeouts - increased for better reliability
             self.browser.implicitly_wait(10)
-            self.browser.set_page_load_timeout(30)
-            self.browser.set_script_timeout(30)
+            self.browser.set_page_load_timeout(90)  # Increased from 30 to handle slow Apple Music pages
+            self.browser.set_script_timeout(45)     # Increased from 30 for better script execution
             
             logger.info("Playlist scraper browser initialized successfully")
             self._initialized = True

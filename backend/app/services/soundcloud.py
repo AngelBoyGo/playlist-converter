@@ -62,7 +62,7 @@ class SoundCloudService:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # CRITICAL FIX: Use webdriver-manager without ChromeType
+            # Configure Chrome options
             chrome_options = webdriver.ChromeOptions()
             
             # Check if headless mode is enabled via environment variable
@@ -76,34 +76,18 @@ class SoundCloudService:
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             
-            logger.info("Installing ChromeDriver that matches the installed Chrome version...")
+            # CRITICAL FIX: Skip webdriver-manager and use selenium-manager directly
+            # This avoids the THIRD_PARTY_NOTICES file issue with webdriver-manager
+            logger.info("Using Selenium Manager to find correct ChromeDriver...")
             
-            try:
-                # Attempt to install matching ChromeDriver using webdriver-manager
-                # Use basic ChromeDriverManager without ChromeType
-                driver_path = ChromeDriverManager().install()
-                logger.info(f"Using ChromeDriver from: {driver_path}")
-                service = Service(executable_path=driver_path)
-                
-                # Create WebDriver with the correct driver
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
-                logger.info("Successfully initialized Chrome browser with matching ChromeDriver")
-            except Exception as e:
-                logger.error(f"Failed to install matching ChromeDriver: {str(e)}", exc_info=True)
-                
-                # Fallback: Try to use existing ChromeDriver
-                try:
-                    logger.info("Fallback: Using existing ChromeDriver...")
-                    self.browser = webdriver.Chrome(options=chrome_options)
-                    logger.info("Successfully initialized Chrome browser with existing ChromeDriver")
-                except Exception as fallback_e:
-                    logger.error(f"Fallback failed: {str(fallback_e)}", exc_info=True)
-                    raise
+            # Create WebDriver directly using Selenium Manager (built into Selenium 4)
+            self.browser = webdriver.Chrome(options=chrome_options)
+            logger.info("Successfully initialized Chrome browser with Selenium Manager")
             
             # Set basic timeouts
             self.browser.implicitly_wait(5)  # Use shorter timeouts for better recovery
-            self.browser.set_page_load_timeout(20)
-            self.browser.set_script_timeout(15)
+            self.browser.set_page_load_timeout(60)  # Increased from 20 to handle slower page loads
+            self.browser.set_script_timeout(30)  # Increased from 15 for better reliability
             
             logger.info("SoundCloud browser initialized successfully")
             self._initialized = True
