@@ -111,74 +111,18 @@ class SoundCloudService:
                 'media-cache-size': 4096  # 4MB media cache
             })
             
-            # CRITICAL FIX: Try multiple ChromeDriver strategies
-            browser_initialized = False
+            # CRITICAL FIX: Always use pre-installed ChromeDriver
+            logger.info("Using pre-installed ChromeDriver at /usr/bin/chromedriver")
+            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
             
-            # Strategy 1: Use pre-installed ChromeDriver
             try:
-                logger.info("Strategy 1: Trying with pre-installed ChromeDriver at /usr/bin/chromedriver")
-                if os.path.exists("/usr/bin/chromedriver"):
-                    chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
-                    self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
-                    browser_initialized = True
-                    logger.info("Successfully initialized browser with pre-installed ChromeDriver")
+                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+                logger.info("Successfully initialized Chrome browser with pre-installed ChromeDriver")
             except Exception as e:
-                logger.warning(f"Strategy 1 failed with pre-installed ChromeDriver: {str(e)}")
-            
-            # Strategy 2: Use explicitly downloaded ChromeDriver
-            if not browser_initialized:
-                try:
-                    logger.info("Strategy 2: Using explicit ChromeDriver download")
-                    from webdriver_manager.chrome import ChromeDriverManager
-
-                    # Disable SSL verification for WebDriver Manager
-                    import ssl
-                    ssl._create_default_https_context = ssl._create_unverified_context
-                    
-                    os.environ['WDM_SSL_VERIFY'] = '0'  # Disable SSL verification
-                    os.environ['WDM_LOG_LEVEL'] = '0'   # Reduce logging noise
-                    
-                    # Use specific download path to avoid NOTICES file issue
-                    driver_path = ChromeDriverManager().install()
-                    logger.info(f"Downloaded ChromeDriver to: {driver_path}")
-                    
-                    # IMPORTANT: Verify the driver path points to the actual binary
-                    if os.path.exists(driver_path):
-                        if os.path.isdir(driver_path):
-                            # If it's a directory, find the actual chromedriver binary
-                            for root, dirs, files in os.walk(driver_path):
-                                for file in files:
-                                    if file == "chromedriver" or file.startswith("chromedriver."):
-                                        driver_path = os.path.join(root, file)
-                                        logger.info(f"Found chromedriver binary at: {driver_path}")
-                                        break
-                        
-                        # Make sure it's executable
-                        if not os.access(driver_path, os.X_OK):
-                            logger.info(f"Making ChromeDriver executable: {driver_path}")
-                            os.chmod(driver_path, 0o755)
-                        
-                        chrome_service = webdriver.ChromeService(executable_path=driver_path)
-                        self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
-                        browser_initialized = True
-                        logger.info("Successfully initialized browser with downloaded ChromeDriver")
-                    else:
-                        logger.error(f"Downloaded driver does not exist at path: {driver_path}")
-                except Exception as e:
-                    logger.warning(f"Strategy 2 failed with explicit download: {str(e)}")
-            
-            # Strategy 3: Use Selenium Manager (last resort)
-            if not browser_initialized:
-                try:
-                    logger.info("Strategy 3: Using Selenium built-in WebDriver manager")
-                    # Let Selenium handle everything
-                    os.environ["USE_SELENIUM_MANAGER"] = "true"
-                    self.browser = webdriver.Chrome(options=chrome_options)
-                    browser_initialized = True
-                    logger.info("Successfully initialized browser with Selenium Manager")
-                except Exception as e:
-                    logger.error(f"Strategy 3 failed with Selenium Manager: {str(e)}")
-                    raise Exception(f"All browser initialization strategies failed: {str(e)}")
+                logger.error(f"Failed to initialize browser with pre-installed ChromeDriver: {str(e)}", exc_info=True)
+                # One last attempt with default configuration
+                logger.info("Attempting to initialize with default configuration")
+                self.browser = webdriver.Chrome(options=chrome_options)
                 
             # Set implicit wait and timeout (reduced from previous values)
             self.browser.implicitly_wait(5)  # Reduced from 10 seconds

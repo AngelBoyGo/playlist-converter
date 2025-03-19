@@ -56,124 +56,60 @@ class PlaylistScraper:
         logger.debug("Initializing PlaylistScraper")
 
     async def initialize_browser(self):
-        """Initialize the browser with proper async handling."""
+        """Initialize browser for playlist scraping."""
         if self._initialized:
             return
 
         try:
-            # Print the Chrome version for diagnostics
-            import subprocess
-            try:
-                chrome_version = subprocess.check_output(['google-chrome', '--version']).decode('utf-8').strip()
-                logger.info(f"Chrome version: {chrome_version}")
-            except Exception as e:
-                logger.warning(f"Failed to get Chrome version: {str(e)}")
-                
             chrome_options = webdriver.ChromeOptions()
             
-            # Essential Chrome options for scraping
-            chrome_options.add_argument('--headless=new')
+            # Check if headless mode is enabled via environment variable
+            headless = os.environ.get("SELENIUM_HEADLESS", "true").lower() == "true"
+            if headless:
+                chrome_options.add_argument('--headless=new')
+                logger.info("Running Chrome in headless mode")
+            
+            # Add default arguments for better stability
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-extensions')
-            
-            # Additional options to reduce resource usage and timeout issues
             chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-infobars')
-            chrome_options.add_argument('--disable-translate')
-            chrome_options.add_argument('--mute-audio')
-            chrome_options.add_argument('--disable-sync')
-            chrome_options.add_argument('--disk-cache-size=0')
-            chrome_options.add_argument('--media-cache-size=0')
-            
-            # Additional options for better scraping
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument('--allow-running-insecure-content')
-            chrome_options.add_argument('--lang=en-US,en')
-            
-            # Set preferences
+            chrome_options.add_argument('--window-size=1280,720')
+            chrome_options.add_argument('--single-process')  # Critical for memory usage
+            chrome_options.add_argument('--user-data-dir=/tmp/chrome-scraper')
+            chrome_options.add_argument('--profile-directory=Profile2')
+
+            # Block images and other resources to speed up loading
             chrome_options.add_experimental_option('prefs', {
-                'profile.default_content_settings.images': 2,  # Disable images
-                'profile.default_content_setting_values.javascript': 1,  # Enable JavaScript
-                'profile.default_content_setting_values.cookies': 1,  # Enable cookies
-                'profile.default_content_setting_values.plugins': 1,  # Enable plugins
-                'profile.default_content_setting_values.popups': 2,  # Disable popups
-                'profile.default_content_setting_values.geolocation': 2,  # Disable geolocation
-                'profile.default_content_setting_values.notifications': 2,  # Disable notifications
-                'profile.managed_default_content_settings.images': 2  # Disable images
+                'profile.default_content_settings.images': 2,
+                'profile.managed_default_content_settings.images': 2
             })
             
-            # Set a realistic user agent that matches current Chrome version
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+            # CRITICAL FIX: Use pre-installed ChromeDriver from Dockerfile 
+            # instead of WebDriverManager's automatic download
+            logger.info("Using pre-installed ChromeDriver at /usr/bin/chromedriver")
+            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
             
-            # Disable automation flags
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # First try using the pre-installed ChromeDriver
             try:
-                logger.info("Trying with pre-installed ChromeDriver at /usr/bin/chromedriver")
-                chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
                 self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+                logger.info("Successfully initialized Chrome browser")
             except Exception as e:
-                logger.warning(f"Failed with pre-installed ChromeDriver: {str(e)}")
+                logger.error(f"Failed to initialize browser with Chrome service: {str(e)}")
+                # Last resort - try letting Selenium manage it
+                logger.info("Attempting to initialize with default service")
+                self.browser = webdriver.Chrome(options=chrome_options)
                 
-                # Fallback to Selenium's built-in WebDriver Manager
-                logger.info("Falling back to Selenium Manager")
-                from selenium.webdriver.chrome.service import Service as ChromeService
-                from webdriver_manager.chrome import ChromeDriverManager
-                
-                # Configure WebDriver Manager
-                os.environ['WDM_LOG_LEVEL'] = '0'  # Suppress logs
-                os.environ['WDM_SSL_VERIFY'] = '0'  # Bypass SSL
-                
-                # Try with WebDriver Manager
-                chrome_service = ChromeService(ChromeDriverManager().install())
-                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+            # Set timeouts
+            self.browser.implicitly_wait(10)
+            self.browser.set_page_load_timeout(30)
+            self.browser.set_script_timeout(30)
             
-            # Set longer page load timeout and wait times 
-            self.browser.set_page_load_timeout(60)  # Increase from 30 to 60 seconds
-            self.wait = WebDriverWait(self.browser, 30)  # Increase wait time
-            
-            # Set script timeout (time a script has to execute)
-            self.browser.set_script_timeout(60)
-            
-            # Execute CDP commands to enable network conditions and set headers
-            logger.info("Configuring CDP commands...")
-            self.browser.execute_cdp_cmd('Network.enable', {})
-            
-            # Set lower network conditions to reduce timeout issues
-            self.browser.execute_cdp_cmd('Network.emulateNetworkConditions', {
-                'offline': False,
-                'latency': 20,  # Add some latency for more stability
-                'downloadThroughput': 1.5 * 1024 * 1024,  # 1.5 Mbps
-                'uploadThroughput': 750 * 1024,  # 750 kbps
-                'connectionType': 'ethernet'
-            })
-            
-            self.browser.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-            })
-            self.browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
-                "headers": {
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                    "Connection": "keep-alive",
-                    "Upgrade-Insecure-Requests": "1"
-                }
-            })
-            
+            logger.info("Scraper browser initialized successfully")
             self._initialized = True
-            logger.info("Browser initialized successfully for scraper with enhanced settings")
             
         except Exception as e:
-            logger.error(f"Failed to initialize browser: {str(e)}")
-            if hasattr(self, 'browser') and self.browser:
-                try:
-                    self.browser.quit()
-                except:
-                    pass
+            logger.error(f"Failed to initialize browser: {str(e)}", exc_info=True)
             raise BrowserInitializationError(f"Failed to initialize browser: {str(e)}")
 
     async def cleanup(self):
