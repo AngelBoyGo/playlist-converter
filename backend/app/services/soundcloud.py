@@ -13,7 +13,6 @@ import re
 import os
 from backend.app.services.utils import timeout_context, CircuitBreaker, RateLimiter, retry_with_exponential_backoff
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.utils import ChromeType
 from selenium.webdriver.chrome.service import Service
 
 logger = logging.getLogger(__name__)
@@ -63,7 +62,7 @@ class SoundCloudService:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # CRITICAL FIX: Use webdriver-manager to get the correct ChromeDriver for installed Chrome
+            # CRITICAL FIX: Use webdriver-manager without ChromeType
             chrome_options = webdriver.ChromeOptions()
             
             # Check if headless mode is enabled via environment variable
@@ -81,7 +80,8 @@ class SoundCloudService:
             
             try:
                 # Attempt to install matching ChromeDriver using webdriver-manager
-                driver_path = ChromeDriverManager(chrome_type=ChromeType.GOOGLE).install()
+                # Use basic ChromeDriverManager without ChromeType
+                driver_path = ChromeDriverManager().install()
                 logger.info(f"Using ChromeDriver from: {driver_path}")
                 service = Service(executable_path=driver_path)
                 

@@ -7,7 +7,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.utils import ChromeType
 import logging
 import re
 from typing import Dict, List, Optional, Any
@@ -70,9 +69,8 @@ class PlaylistScraper:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # CRITICAL FIX: Use webdriver-manager to get the correct ChromeDriver for installed Chrome
+            # CRITICAL FIX: Use webdriver-manager without ChromeType
             from selenium import webdriver
-            from webdriver_manager.chrome import ChromeDriverManager
             from selenium.webdriver.chrome.service import Service
             
             chrome_options = webdriver.ChromeOptions()
@@ -92,7 +90,8 @@ class PlaylistScraper:
             
             try:
                 # Attempt to install matching ChromeDriver using webdriver-manager
-                driver_path = ChromeDriverManager(chrome_type=ChromeType.GOOGLE).install()
+                # Use basic ChromeDriverManager without ChromeType
+                driver_path = ChromeDriverManager().install()
                 logger.info(f"Using ChromeDriver from: {driver_path}")
                 service = Service(executable_path=driver_path)
                 
