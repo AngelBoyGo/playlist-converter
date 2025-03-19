@@ -53,6 +53,11 @@ class PlaylistScraper:
         self.browser = None
         self.wait = None
         self._initialized = False
+        self._state = {
+            'last_action': 'init',
+            'last_action_time': datetime.now().isoformat()
+        }
+        self._last_action_time = datetime.now()
         logger.debug("Initializing PlaylistScraper")
 
     async def initialize_browser(self):
