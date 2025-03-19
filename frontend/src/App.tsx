@@ -30,6 +30,9 @@ function App() {
   const [batchSize, setBatchSize] = useState<BatchSize>(5);
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
+  const [detailedStatus, setDetailedStatus] = useState('');
+  const [processingPhase, setProcessingPhase] = useState('');
+  const [performanceStats, setPerformanceStats] = useState<any>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ConversionResponse | null>(null);
@@ -48,6 +51,9 @@ function App() {
     
     setLoading(true);
     setLoadingStatus('Initializing...');
+    setDetailedStatus('Starting conversion process...');
+    setProcessingPhase('initializing');
+    setPerformanceStats(null);
     setError(null);
     setResult(null);
     setRateLimited(false);
@@ -69,6 +75,11 @@ function App() {
       if (response.details?.current_batch?.rate_limited) {
         setRateLimited(true);
       }
+      
+      // Update detailed status information
+      setDetailedStatus(response.details.detailed_status || '');
+      setProcessingPhase(response.details.processing_phase || '');
+      setPerformanceStats(response.details.performance_stats || null);
       
       setResult(response);
       

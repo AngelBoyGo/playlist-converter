@@ -23,6 +23,17 @@ export interface Track {
   error?: string;
 }
 
+export interface PerformanceStats {
+  scraper_init_time: string;
+  soundcloud_init_time: string;
+  playlist_fetch_time: string;
+  avg_search_time: string;
+  total_search_time: string;
+  total_time: string;
+  rate_limited: boolean;
+  browser_stats?: any;
+}
+
 export interface ConversionResponse {
   success: boolean;
   message: string;
@@ -35,6 +46,10 @@ export interface ConversionResponse {
     success_rate: number;
     tracks: Track[];
     current_batch: BatchInfo;
+    processing_phase: string;
+    detailed_status: string;
+    last_action_time: string;
+    performance_stats?: PerformanceStats;
   };
 }
 

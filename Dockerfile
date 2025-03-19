@@ -52,6 +52,11 @@ ENV PYTHONUNBUFFERED=1
 ENV SELENIUM_HEADLESS=true
 ENV USE_SELENIUM_MANAGER=true
 
+# Additional environment variables for optimization
+ENV CHROMEDRIVER_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --single-process"
+ENV NODE_OPTIONS="--max-old-space-size=256"
+ENV PYTHONHASHSEED=0
+
 # Set up working directory
 WORKDIR /app
 
@@ -65,7 +70,10 @@ WORKDIR /app/frontend
 RUN npm install && \
     npm run build && \
     mkdir -p /app/frontend-dist && \
-    cp -r dist/* /app/frontend-dist/
+    cp -r dist/* /app/frontend-dist/ && \
+    # Clean up npm cache to reduce image size
+    npm cache clean --force && \
+    rm -rf node_modules
 
 # Copy the rest of the application
 WORKDIR /app
@@ -76,6 +84,10 @@ RUN echo 'import fastapi; app = fastapi.FastAPI(); @app.get("/api/health"); def 
 
 # Expose port
 EXPOSE 8080
+
+# Set up runtime limits for the container
+ENV CHROME_MEMORY_LIMIT="512m"
+ENV MAX_CONCURRENT_BROWSERS=1
 
 # Command to run the app
 CMD ["python", "start_server.py"] 
