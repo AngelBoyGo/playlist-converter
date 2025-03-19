@@ -66,6 +66,13 @@ class SoundCloudService:
             if headless:
                 chrome_options.add_argument('--headless=new')
                 logger.info("Running Chrome in headless mode")
+                
+            # CRITICAL FIX: Force compatibility between older ChromeDriver and newer Chrome
+            chrome_options.add_argument('--ignore-certificate-errors')
+            chrome_options.add_argument('--ignore-ssl-errors')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+            # Set browser version compatibility flag
+            chrome_options.add_experimental_option('w3c', False)
             
             # Add default arguments for container environments
             chrome_options.add_argument('--no-sandbox')
@@ -111,17 +118,23 @@ class SoundCloudService:
                 'media-cache-size': 4096  # 4MB media cache
             })
             
-            # CRITICAL FIX: Always use pre-installed ChromeDriver
+            # CRITICAL FIX: Always use pre-installed ChromeDriver with compatibility args
             logger.info("Using pre-installed ChromeDriver at /usr/bin/chromedriver")
-            chrome_service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
+            service_args = ['--verbose', '--log-path=/tmp/soundcloud-chromedriver.log']
+            chrome_service = webdriver.ChromeService(
+                executable_path="/usr/bin/chromedriver",
+                service_args=service_args
+            )
             
             try:
                 self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
                 logger.info("Successfully initialized Chrome browser with pre-installed ChromeDriver")
             except Exception as e:
                 logger.error(f"Failed to initialize browser with pre-installed ChromeDriver: {str(e)}", exc_info=True)
-                # One last attempt with default configuration
-                logger.info("Attempting to initialize with default configuration")
+                # Last resort with relaxed capabilities
+                logger.info("Attempting to initialize with relaxed capabilities")
+                chrome_options.set_capability('browserVersion', '')
+                chrome_options.set_capability('platformName', '')
                 self.browser = webdriver.Chrome(options=chrome_options)
                 
             # Set implicit wait and timeout (reduced from previous values)
