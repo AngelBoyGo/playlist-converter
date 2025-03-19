@@ -61,11 +61,15 @@ class PlaylistScraper:
         logger.debug("Initializing PlaylistScraper")
 
     async def initialize_browser(self):
-        """Initialize browser for playlist scraping with enhanced stability for cloud environments."""
+        """Initialize browser for playlist scraping with extreme resource optimization for containerized environments."""
         if self._initialized:
             return
 
         try:
+            # Detect if we're in a resource-constrained container environment (like Render)
+            in_container = os.environ.get("RENDER", "") != "" or os.path.exists("/.dockerenv")
+            logger.info(f"Environment detection: container={in_container}")
+            
             # Print the Chrome version for diagnostics
             import subprocess
             try:
@@ -74,83 +78,126 @@ class PlaylistScraper:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # Configure Chrome options with stability focus for cloud environments
+            # Configure Chrome options with EXTREME resource limitations for containers
             chrome_options = webdriver.ChromeOptions()
             
-            # Check if headless mode is enabled via environment variable
-            headless = os.environ.get("SELENIUM_HEADLESS", "true").lower() == "true"
-            if headless:
-                chrome_options.add_argument('--headless=new')
-                logger.info("Running Chrome in headless mode")
+            # Always use headless mode in production environments
+            chrome_options.add_argument('--headless=new')
+            logger.info("Running Chrome in headless mode")
             
-            # STABILITY: Essential minimal arguments with focus on stability
+            # CRITICAL: Absolute minimum memory usage configuration
+            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
             
-            # CRITICAL: Memory optimization for cloud environments
+            # EXPERIMENTAL: Force reduced memory limits to survive in container
+            chrome_options.add_argument('--disable-features=site-per-process')  # Disable site isolation
+            chrome_options.add_argument('--renderer-process-limit=1')  # Only allow one renderer process
+            chrome_options.add_argument('--disable-hang-monitor')  # Disable the hang monitor
+            chrome_options.add_argument('--process-per-site')  # Use process-per-site instead of process-per-tab
+            chrome_options.add_argument('--single-process')  # Most aggressive - force single process mode
+            
+            # Reduce JavaScript memory footprint drastically
+            chrome_options.add_argument('--js-flags=--max-old-space-size=64')  # Limit JS heap to 64MB
+            
+            # Disable everything non-essential
             chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-automation')
-            chrome_options.add_argument('--disable-software-rasterizer')
-            chrome_options.add_argument('--disable-background-networking')
+            chrome_options.add_argument('--disable-component-extensions-with-background-pages')
             chrome_options.add_argument('--disable-default-apps')
+            chrome_options.add_argument('--disable-background-networking')
             chrome_options.add_argument('--disable-sync')
             chrome_options.add_argument('--disable-translate')
-            chrome_options.add_argument('--mute-audio')
             chrome_options.add_argument('--hide-scrollbars')
-            chrome_options.add_argument('--single-process')  # Critical for stability in low memory
+            chrome_options.add_argument('--mute-audio')
+            chrome_options.add_argument('--blink-settings=imagesEnabled=false')
             
-            # RESOURCE USAGE: Set very low JavaScript memory limits
-            chrome_options.add_argument('--js-flags=--max-old-space-size=128')
+            # Disable storage APIs to save memory
+            chrome_options.add_argument('--disable-local-storage')
+            chrome_options.add_argument('--disable-session-storage')
+            chrome_options.add_argument('--disable-notifications')
             
-            # Add specific crash-related options
+            # Prevent crash reporting and diagnostics
             chrome_options.add_argument('--disable-crash-reporter')
-            chrome_options.add_argument('--disable-in-process-stack-traces')
+            chrome_options.add_argument('--disable-breakpad')  # Disable crashdump creation
+            chrome_options.add_argument('--disable-logging')
             chrome_options.add_argument('--log-level=3')  # Minimal logging
             
-            # Skip webdriver-manager and use selenium-manager directly
-            logger.info("Using Selenium Manager to find correct ChromeDriver...")
+            # Configure prefs for minimal memory use
+            chrome_options.add_experimental_option('prefs', {
+                'profile.default_content_setting_values.cookies': 2,  # Block cookies
+                'profile.default_content_setting_values.images': 2,  # Block images
+                'profile.default_content_setting_values.popups': 2,  # Block popups
+                'profile.managed_default_content_settings.javascript': 1,  # Allow JS (needed)
+                'profile.default_content_setting_values.notifications': 2,  # Block notifications
+                'profile.managed_default_content_settings.plugins': 2,  # Block plugins
+            })
             
-            # Create WebDriver directly using Selenium Manager (built into Selenium 4)
-            self.browser = webdriver.Chrome(options=chrome_options)
-            logger.info("Successfully initialized Chrome browser with Selenium Manager")
-            
-            # Set very aggressive timeouts for cloud environment
-            self.browser.implicitly_wait(5)  # Reduced from 10s
-            self.browser.set_page_load_timeout(45)  # Reduced from 90s
-            self.browser.set_script_timeout(20)  # Reduced from 45s
-            
-            # Test browser responsiveness
-            try:
-                # Navigate to a minimal blank page to test stability
-                self.browser.get('about:blank')
-                # Execute minimal JavaScript to check engine responsiveness
-                self.browser.execute_script('return true;')
-                logger.info("Browser initialization confirmed working")
-            except Exception as e:
-                logger.error(f"Browser failed initial stability test: {str(e)}")
-                # Force cleanup and retry with even more minimal setup
-                if hasattr(self, 'browser') and self.browser:
+            # New approach: progressive browser initialization with retries
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    logger.info(f"Browser initialization attempt {attempt}/{max_retries}")
+                    
+                    # Create WebDriver directly using Selenium Manager (built into Selenium 4)
+                    self.browser = webdriver.Chrome(options=chrome_options)
+                    logger.info("Successfully initialized Chrome browser with Selenium Manager")
+                    
+                    # Set very aggressive timeouts for cloud environment
+                    self.browser.implicitly_wait(2)  # Very short implicit wait
+                    self.browser.set_page_load_timeout(20)  # Short page load timeout
+                    self.browser.set_script_timeout(10)  # Short script timeout
+                    
+                    # Test browser with absolute minimal test
                     try:
-                        self.browser.quit()
-                    except:
-                        pass
-                
-                # Create a super minimal browser as fallback
-                chrome_options = webdriver.ChromeOptions()
-                chrome_options.add_argument('--headless=new')
-                chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--disable-dev-shm-usage')
-                chrome_options.add_argument('--disable-gpu')
-                chrome_options.add_argument('--single-process')
-                
-                # Try again with bare minimum options
-                self.browser = webdriver.Chrome(options=chrome_options)
-                logger.info("Using fallback minimal Chrome setup due to stability concerns")
-            
-            logger.info("Playlist scraper browser initialized successfully")
-            self._initialized = True
-            
+                        # Navigate to a blank page - lowest possible resource usage
+                        self.browser.get('about:blank')
+                        
+                        # If we get here, the browser is responsive
+                        self._initialized = True
+                        logger.info("Browser initialization confirmed working with minimal test")
+                        return
+                    except Exception as test_error:
+                        logger.error(f"Browser failed initial test: {str(test_error)}")
+                        # Clean up and try again with even more minimal options
+                        if hasattr(self, 'browser') and self.browser:
+                            try:
+                                self.browser.quit()
+                            except:
+                                pass
+                        
+                        if attempt < max_retries:
+                            # Make options even more minimal with each retry
+                            if attempt == 2:
+                                # On second attempt, add these extreme options
+                                chrome_options.add_argument('--disable-3d-apis')
+                                chrome_options.add_argument('--disable-accelerated-2d-canvas')
+                                chrome_options.add_argument('--disable-accelerated-jpeg-decoding')
+                                chrome_options.add_argument('--disable-accelerated-mjpeg-decode')
+                                chrome_options.add_argument('--disable-accelerated-video-decode')
+                                logger.info("Adding additional resource restrictions for retry")
+                            elif attempt == 3:
+                                # On final attempt, try the absolute minimal configuration
+                                chrome_options = webdriver.ChromeOptions()
+                                chrome_options.add_argument('--headless=new')
+                                chrome_options.add_argument('--no-sandbox')
+                                chrome_options.add_argument('--disable-dev-shm-usage')
+                                chrome_options.add_argument('--disable-gpu')
+                                chrome_options.add_argument('--single-process')
+                                logger.info("Using bare minimum browser configuration for final attempt")
+                except Exception as e:
+                    logger.error(f"Browser creation error on attempt {attempt}: {str(e)}")
+                    if hasattr(self, 'browser') and self.browser:
+                        try:
+                            self.browser.quit()
+                        except:
+                            pass
+                    
+                    if attempt == max_retries:
+                        # All attempts failed
+                        self._initialized = False
+                        logger.error("All browser initialization attempts failed")
+                        raise
+        
         except Exception as e:
             logger.error(f"Browser initialization failed: {str(e)}", exc_info=True)
             self._initialized = False
