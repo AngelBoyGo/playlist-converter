@@ -28,6 +28,7 @@ from .spotify import SpotifyService
 from .soundcloud import SoundCloudService
 import psutil
 import signal
+import random
 
 # Configure logging with more detailed format
 logging.basicConfig(
@@ -80,14 +81,12 @@ class PlaylistScraper:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # Configure Chrome options with EXTREME resource limitations for containers
-            chrome_options = webdriver.ChromeOptions()
-            
             # CRITICAL: Create a unique temporary user data directory for each Chrome instance
             import tempfile
             import uuid
             import psutil
             import signal
+            import time
             
             # First, attempt to kill any existing Chrome processes - critical in container environments
             try:
@@ -109,30 +108,91 @@ class PlaylistScraper:
                         pass
                 logger.info(f"Killed {chrome_processes_killed} Chrome processes")
                 
-                # Also try to remove any existing Chrome user data directories
+                # NEW: Also forcibly kill chromedriver processes
+                chromedriver_killed = 0
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        proc_name = proc.info['name'].lower()
+                        if 'chromedriver' in proc_name:
+                            try:
+                                os.kill(proc.info['pid'], signal.SIGKILL)
+                                chromedriver_killed += 1
+                                logger.info(f"Killed ChromeDriver process with PID {proc.info['pid']}")
+                            except Exception as kill_err:
+                                logger.warning(f"Failed to kill ChromeDriver process {proc.info['pid']}: {str(kill_err)}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                logger.info(f"Killed {chromedriver_killed} ChromeDriver processes")
+                
+                # NEW: Clean leftover locks with system commands
+                os.system("rm -f /tmp/.X*-lock")
+                os.system("rm -f /tmp/.com.google.Chrome*")
+                
+                # NEW: Force remove all Chrome user data directories 
                 import glob
+                import shutil
                 for chrome_dir in glob.glob("/tmp/chrome_data_*"):
                     try:
-                        os.system(f"rm -rf {chrome_dir}")  # Force remove with system command
+                        # First try OS-level deletion for force
+                        os.system(f"rm -rf {chrome_dir}")
+                        
+                        # Double-check with Python's shutil
+                        if os.path.exists(chrome_dir):
+                            shutil.rmtree(chrome_dir, ignore_errors=True)
+                            
                         logger.info(f"Forcibly removed Chrome directory: {chrome_dir}")
                     except Exception as rm_err:
                         logger.warning(f"Failed to remove directory {chrome_dir}: {str(rm_err)}")
             except Exception as proc_err:
                 logger.warning(f"Error when cleaning up Chrome processes: {str(proc_err)}")
             
-            # Create a unique temp directory for Chrome user data to prevent conflicts
-            temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_{uuid.uuid4().hex}_{int(time.time())}_")
-            logger.info(f"Created temporary Chrome user data directory: {temp_dir}")
+            # Add a random delay to allow system to clean up resources
+            delay = random.uniform(0.5, 1.5)
+            logger.info(f"Waiting {delay:.2f} seconds for system cleanup")
+            time.sleep(delay)
             
-            # Make sure the directory is empty and has proper permissions
+            # NEW: Create a truly unique user data directory using process ID and timestamp
+            pid = os.getpid()
+            timestamp = int(time.time())
+            random_id = uuid.uuid4().hex[:8]
+            temp_dir = f"/tmp/chrome_tmp_{pid}_{timestamp}_{random_id}"
+            
+            # Ensure the directory doesn't exist
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception as e:
+                    pass
+                
+            # Create fresh directory with restrictive permissions
             try:
-                os.chmod(temp_dir, 0o700)  # Set restrictive permissions
-                logger.info(f"Set permissions on Chrome user data directory: {temp_dir}")
-            except Exception as chmod_err:
-                logger.warning(f"Failed to set permissions: {str(chmod_err)}")
+                os.makedirs(temp_dir, mode=0o700, exist_ok=False)
+                logger.info(f"Created fresh Chrome user data directory: {temp_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to create directory {temp_dir}: {str(e)}")
+                # Fall back to RAM-based storage if we can't create the directory
+                temp_dir = "/dev/shm/chrome_tmp_" + random_id
+                try:
+                    os.makedirs(temp_dir, mode=0o700, exist_ok=False)
+                    logger.info(f"Created RAM-based Chrome user data directory: {temp_dir}")
+                except Exception as e2:
+                    logger.warning(f"Failed to create RAM directory: {str(e2)}")
+                    # Ultimate fallback - let Chrome decide
+                    temp_dir = ""
             
-            # Add the user-data-dir flag to prevent the "directory in use" error
-            chrome_options.add_argument(f'--user-data-dir={temp_dir}')
+            # Configure Chrome options with EXTREME resource limitations for containers
+            chrome_options = webdriver.ChromeOptions()
+            
+            # CRITICAL: Set the user data directory to our fresh directory, or bypass it completely
+            if temp_dir:
+                chrome_options.add_argument(f'--user-data-dir={temp_dir}')
+                logger.info(f"Using custom user data directory: {temp_dir}")
+            else:
+                # Use a null profile directory to avoid any disk data
+                chrome_options.add_argument('--incognito')
+                chrome_options.add_argument('--profile-directory=Default')
+                chrome_options.add_argument('--disable-infobars')
+                logger.info("Using incognito mode with no user data directory")
             
             # Add flags to prevent lock file issues
             chrome_options.add_argument('--no-first-run')
@@ -244,44 +304,79 @@ class PlaylistScraper:
                                 logger.warning(f"Failed to clean up Chrome user data directory: {str(cleanup_error)}")
                         
                         if attempt < max_retries:
-                            # Create a new temp directory for each retry with timestamp to ensure uniqueness
-                            new_temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_retry{attempt}_{uuid.uuid4().hex}_{int(time.time())}_")
-                            logger.info(f"Created new temporary Chrome user data directory for retry: {new_temp_dir}")
+                            # Wait longer between retries
+                            retry_delay = random.uniform(1.0, 3.0) * attempt  # Increase delay with each retry
+                            logger.info(f"Waiting {retry_delay:.2f} seconds before retry {attempt+1}/{max_retries}")
+                            time.sleep(retry_delay)
                             
-                            # Create a completely new ChromeOptions object for each retry
+                            # Create a completely new temp directory for this attempt
+                            pid = os.getpid()
+                            timestamp = int(time.time())
+                            random_id = uuid.uuid4().hex[:8]
+                            new_temp_dir = f"/tmp/chrome_retry_{attempt}_{pid}_{timestamp}_{random_id}"
+                            
+                            try:
+                                # Ensure it's empty
+                                if os.path.exists(new_temp_dir):
+                                    shutil.rmtree(new_temp_dir, ignore_errors=True)
+                                    
+                                # Create with restrictive permissions
+                                os.makedirs(new_temp_dir, mode=0o700, exist_ok=False)
+                                logger.info(f"Created fresh retry directory: {new_temp_dir}")
+                            except Exception as e:
+                                logger.warning(f"Failed to create retry directory {new_temp_dir}: {str(e)}")
+                                # Use RAM-based storage as fallback
+                                new_temp_dir = f"/dev/shm/chrome_retry_{attempt}_{random_id}"
+                                try:
+                                    os.makedirs(new_temp_dir, mode=0o700, exist_ok=False)
+                                    logger.info(f"Created RAM-based retry directory: {new_temp_dir}")
+                                except Exception as e2:
+                                    logger.warning(f"Failed to create RAM retry directory: {str(e2)}")
+                                    # Final fallback - let Chrome decide
+                                    new_temp_dir = ""
+                            
+                            # Create a new ChromeOptions object for each retry
                             chrome_options = webdriver.ChromeOptions()
                             
                             # Make options even more minimal with each retry
-                            if attempt == 2:
-                                # On second attempt, use minimal options with the new temp dir
+                            if attempt == 1:
+                                # On second attempt, use minimal options
                                 chrome_options.add_argument('--headless=new')
                                 chrome_options.add_argument('--no-sandbox')
                                 chrome_options.add_argument('--disable-dev-shm-usage')
                                 chrome_options.add_argument('--disable-gpu')
-                                chrome_options.add_argument('--single-process')
+                                chrome_options.add_argument('--incognito')
                                 chrome_options.add_argument('--disable-extensions')
                                 chrome_options.add_argument('--disable-logging')
                                 chrome_options.add_argument('--log-level=3')
-                                chrome_options.add_argument(f'--user-data-dir={new_temp_dir}')
                                 chrome_options.add_argument('--no-first-run')
                                 chrome_options.add_argument('--no-default-browser-check')
+                                
+                                if new_temp_dir:
+                                    chrome_options.add_argument(f'--user-data-dir={new_temp_dir}')
+                                    logger.info(f"Using custom retry directory: {new_temp_dir}")
+                                else:
+                                    logger.info("Using no user data directory for retry")
+                                    
                                 logger.info("Using simpler browser configuration for retry")
-                            elif attempt == 3:
-                                # On final attempt, try the absolute minimal configuration with the new temp dir
+                            elif attempt == 2:
+                                # On final attempt, try remote debugging mode - completely different approach
                                 chrome_options = webdriver.ChromeOptions()
+                                debug_port = random.randint(9222, 9999)
                                 chrome_options.add_argument('--headless=new')
                                 chrome_options.add_argument('--no-sandbox')
                                 chrome_options.add_argument('--disable-dev-shm-usage')
                                 chrome_options.add_argument('--disable-gpu')
-                                chrome_options.add_argument('--disable-software-rasterizer')
+                                chrome_options.add_argument('--incognito')
+                                chrome_options.add_argument(f'--remote-debugging-port={debug_port}')
                                 chrome_options.add_argument('--disable-extensions')
-                                chrome_options.add_argument(f'--user-data-dir={new_temp_dir}')
-                                chrome_options.add_argument('--no-first-run')
-                                chrome_options.add_argument('--no-default-browser-check')
                                 chrome_options.add_argument('--disable-site-isolation-trials')
-                                logger.info("Using bare minimum browser configuration for final attempt")
+                                
+                                # Bypass user data directory completely
+                                chrome_options.add_argument('--guest')  # Use guest mode
+                                logger.info(f"Using remote debugging on port {debug_port} with guest mode for final attempt")
                             
-                            # Update the temp_dir variable to the new directory for proper cleanup later
+                            # Update the temp_dir variable for cleanup
                             temp_dir = new_temp_dir
                 except Exception as e:
                     logger.error(f"Browser creation error on attempt {attempt}: {str(e)}")
