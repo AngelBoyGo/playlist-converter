@@ -26,6 +26,8 @@ import os
 import traceback
 from .spotify import SpotifyService
 from .soundcloud import SoundCloudService
+import psutil
+import signal
 
 # Configure logging with more detailed format
 logging.basicConfig(
@@ -84,13 +86,58 @@ class PlaylistScraper:
             # CRITICAL: Create a unique temporary user data directory for each Chrome instance
             import tempfile
             import uuid
+            import psutil
+            import signal
+            
+            # First, attempt to kill any existing Chrome processes - critical in container environments
+            try:
+                logger.info("Attempting to kill any existing Chrome processes")
+                chrome_processes_killed = 0
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        # Look for any chrome-related processes
+                        proc_name = proc.info['name'].lower()
+                        if 'chrome' in proc_name or 'chromium' in proc_name:
+                            try:
+                                # Force kill the process
+                                os.kill(proc.info['pid'], signal.SIGKILL)
+                                chrome_processes_killed += 1
+                                logger.info(f"Killed Chrome process with PID {proc.info['pid']}")
+                            except Exception as kill_err:
+                                logger.warning(f"Failed to kill Chrome process {proc.info['pid']}: {str(kill_err)}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                logger.info(f"Killed {chrome_processes_killed} Chrome processes")
+                
+                # Also try to remove any existing Chrome user data directories
+                import glob
+                for chrome_dir in glob.glob("/tmp/chrome_data_*"):
+                    try:
+                        os.system(f"rm -rf {chrome_dir}")  # Force remove with system command
+                        logger.info(f"Forcibly removed Chrome directory: {chrome_dir}")
+                    except Exception as rm_err:
+                        logger.warning(f"Failed to remove directory {chrome_dir}: {str(rm_err)}")
+            except Exception as proc_err:
+                logger.warning(f"Error when cleaning up Chrome processes: {str(proc_err)}")
             
             # Create a unique temp directory for Chrome user data to prevent conflicts
-            temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_{uuid.uuid4().hex}_")
+            temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_{uuid.uuid4().hex}_{int(time.time())}_")
             logger.info(f"Created temporary Chrome user data directory: {temp_dir}")
+            
+            # Make sure the directory is empty and has proper permissions
+            try:
+                os.chmod(temp_dir, 0o700)  # Set restrictive permissions
+                logger.info(f"Set permissions on Chrome user data directory: {temp_dir}")
+            except Exception as chmod_err:
+                logger.warning(f"Failed to set permissions: {str(chmod_err)}")
             
             # Add the user-data-dir flag to prevent the "directory in use" error
             chrome_options.add_argument(f'--user-data-dir={temp_dir}')
+            
+            # Add flags to prevent lock file issues
+            chrome_options.add_argument('--no-first-run')
+            chrome_options.add_argument('--no-default-browser-check')
+            chrome_options.add_argument('--password-store=basic')
             
             # Also disable any disk cache to prevent disk usage growth
             chrome_options.add_argument('--disk-cache-size=1')
@@ -185,26 +232,40 @@ class PlaylistScraper:
                             try:
                                 import shutil
                                 if os.path.exists(temp_dir):
-                                    shutil.rmtree(temp_dir, ignore_errors=True)
-                                    logger.info(f"Cleaned up Chrome user data directory: {temp_dir}")
+                                    # Try force removal with system command first
+                                    os.system(f"rm -rf {temp_dir}")
+                                    logger.info(f"Force removed Chrome user data directory: {temp_dir}")
+                                    
+                                    # Then try the normal way as backup
+                                    if os.path.exists(temp_dir):
+                                        shutil.rmtree(temp_dir, ignore_errors=True)
+                                        logger.info(f"Cleaned up Chrome user data directory: {temp_dir}")
                             except Exception as cleanup_error:
                                 logger.warning(f"Failed to clean up Chrome user data directory: {str(cleanup_error)}")
                         
                         if attempt < max_retries:
-                            # Create a new temp directory for each retry
-                            temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_{uuid.uuid4().hex}_retry{attempt}_")
-                            logger.info(f"Created new temporary Chrome user data directory for retry: {temp_dir}")
+                            # Create a new temp directory for each retry with timestamp to ensure uniqueness
+                            new_temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_retry{attempt}_{uuid.uuid4().hex}_{int(time.time())}_")
+                            logger.info(f"Created new temporary Chrome user data directory for retry: {new_temp_dir}")
+                            
+                            # Create a completely new ChromeOptions object for each retry
+                            chrome_options = webdriver.ChromeOptions()
                             
                             # Make options even more minimal with each retry
                             if attempt == 2:
-                                # On second attempt, add these extreme options while keeping the new temp dir
-                                chrome_options.add_argument('--disable-3d-apis')
-                                chrome_options.add_argument('--disable-accelerated-2d-canvas')
-                                chrome_options.add_argument('--disable-accelerated-jpeg-decoding')
-                                chrome_options.add_argument('--disable-accelerated-mjpeg-decode')
-                                chrome_options.add_argument('--disable-accelerated-video-decode')
-                                chrome_options.add_argument(f'--user-data-dir={temp_dir}')  # Add the new temp dir
-                                logger.info("Adding additional resource restrictions for retry")
+                                # On second attempt, use minimal options with the new temp dir
+                                chrome_options.add_argument('--headless=new')
+                                chrome_options.add_argument('--no-sandbox')
+                                chrome_options.add_argument('--disable-dev-shm-usage')
+                                chrome_options.add_argument('--disable-gpu')
+                                chrome_options.add_argument('--single-process')
+                                chrome_options.add_argument('--disable-extensions')
+                                chrome_options.add_argument('--disable-logging')
+                                chrome_options.add_argument('--log-level=3')
+                                chrome_options.add_argument(f'--user-data-dir={new_temp_dir}')
+                                chrome_options.add_argument('--no-first-run')
+                                chrome_options.add_argument('--no-default-browser-check')
+                                logger.info("Using simpler browser configuration for retry")
                             elif attempt == 3:
                                 # On final attempt, try the absolute minimal configuration with the new temp dir
                                 chrome_options = webdriver.ChromeOptions()
@@ -212,9 +273,16 @@ class PlaylistScraper:
                                 chrome_options.add_argument('--no-sandbox')
                                 chrome_options.add_argument('--disable-dev-shm-usage')
                                 chrome_options.add_argument('--disable-gpu')
-                                chrome_options.add_argument('--single-process')
-                                chrome_options.add_argument(f'--user-data-dir={temp_dir}')  # Add the new temp dir
+                                chrome_options.add_argument('--disable-software-rasterizer')
+                                chrome_options.add_argument('--disable-extensions')
+                                chrome_options.add_argument(f'--user-data-dir={new_temp_dir}')
+                                chrome_options.add_argument('--no-first-run')
+                                chrome_options.add_argument('--no-default-browser-check')
+                                chrome_options.add_argument('--disable-site-isolation-trials')
                                 logger.info("Using bare minimum browser configuration for final attempt")
+                            
+                            # Update the temp_dir variable to the new directory for proper cleanup later
+                            temp_dir = new_temp_dir
                 except Exception as e:
                     logger.error(f"Browser creation error on attempt {attempt}: {str(e)}")
                     if hasattr(self, 'browser') and self.browser:
