@@ -205,6 +205,14 @@ async def convert_playlist(
     Returns:
         A response containing the conversion results.
     """
+    # Helper function to update progress tracking
+    def update_progress(response, phase, status, detailed_status):
+        """Helper to update progress tracking"""
+        response.details.processing_phase = phase
+        response.details.detailed_status = status
+        response.details.last_action_time = datetime.now().isoformat()
+        logger.info(f"[TRACE][{request_id}] Progress: {phase} - {status}")
+    
     # Initialize response
     response = ConversionResponse(
         success=False,
@@ -347,13 +355,6 @@ async def convert_playlist(
         'detailed_status': 'Starting conversion process',
         'last_action_time': datetime.now().isoformat()
     }
-    
-    def update_progress(response, phase, status, detailed_status):
-        """Helper to update progress tracking"""
-        response.details.processing_phase = phase
-        response.details.detailed_status = status
-        response.details.last_action_time = datetime.now().isoformat()
-        logger.info(f"[TRACE][{request_id}] Progress: {phase} - {status}")
     
     try:
         # Process tracks in the current batch with timeout protection
