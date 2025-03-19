@@ -29,6 +29,6 @@ pytest-asyncio>=0.15.1
 # New dependencies
 fastapi==0.104.1
 uvicorn==0.23.2
-pydantic==2.5.2
+pydantic==1.10.13
 python-multipart==0.0.6
 fastapi-utils==0.2.1 
