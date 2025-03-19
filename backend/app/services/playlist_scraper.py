@@ -76,28 +76,15 @@ class PlaylistScraper:
             if headless:
                 chrome_options.add_argument('--headless=new')
                 logger.info("Running Chrome in headless mode")
-                
-            # CRITICAL FIX: Force compatibility between older ChromeDriver and newer Chrome
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--ignore-ssl-errors')
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            # Set browser version compatibility flag
-            chrome_options.add_experimental_option('w3c', False)
             
-            # Add default arguments for container environments
+            # Add standard arguments for better stability
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--window-size=1280,720')
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-            
-            # Additional flags to improve stability in containerized environments
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-infobars')
-            chrome_options.add_argument('--disable-web-security')
-            chrome_options.add_argument('--single-process')  # Critical for memory usage
-            chrome_options.add_argument('--no-zygote')
-            chrome_options.add_argument('--disable-setuid-sandbox')
+            chrome_options.add_argument('--window-size=1280,720')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
             
             # Block unnecessary content types to speed up loading
             chrome_options.add_experimental_option('prefs', {
@@ -107,30 +94,26 @@ class PlaylistScraper:
                 'profile.managed_default_content_settings.images': 2,  # Redundant but to be sure
             })
             
-            # CRITICAL FIX: Always use pre-installed ChromeDriver with compatibility args
+            # CRITICAL FIX: Use pre-installed ChromeDriver with minimal options
             logger.info("Using pre-installed ChromeDriver at /usr/bin/chromedriver")
-            service_args = ['--verbose', '--log-path=/tmp/playlist-chromedriver.log']
-            chrome_service = webdriver.ChromeService(
-                executable_path="/usr/bin/chromedriver",
-                service_args=service_args
-            )
+            service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
             
             try:
-                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
                 logger.info("Successfully initialized Chrome browser with pre-installed ChromeDriver")
             except Exception as e:
                 logger.error(f"Failed to initialize browser with pre-installed ChromeDriver: {str(e)}", exc_info=True)
-                # Last resort with relaxed capabilities
-                logger.info("Attempting to initialize with relaxed capabilities")
-                chrome_options.set_capability('browserVersion', '')
-                chrome_options.set_capability('platformName', '')
-                self.browser = webdriver.Chrome(options=chrome_options)
+                # Try with minimal options if first attempt fails
+                logger.info("Retrying with minimal options")
+                minimal_options = webdriver.ChromeOptions()
+                minimal_options.add_argument('--no-sandbox')
+                minimal_options.add_argument('--disable-dev-shm-usage')
+                minimal_options.add_argument('--headless=new')
+                self.browser = webdriver.Chrome(options=minimal_options)
             
             # Set implicit wait and timeout
             self.browser.implicitly_wait(10)
             self.browser.set_page_load_timeout(30)
-            
-            # Set script timeout
             self.browser.set_script_timeout(30)
             
             logger.info("Playlist scraper browser initialized successfully")

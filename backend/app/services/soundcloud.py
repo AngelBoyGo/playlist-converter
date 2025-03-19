@@ -23,6 +23,7 @@ class SoundCloudService:
         logger.debug("Initializing SoundCloudService...")
         self.browser = None
         self._initialized = False
+        self._id = id(self)  # Add unique ID for the service instance
         
         # Initialize circuit breaker for search protection
         self.circuit_breaker = CircuitBreaker(
@@ -66,83 +67,44 @@ class SoundCloudService:
             if headless:
                 chrome_options.add_argument('--headless=new')
                 logger.info("Running Chrome in headless mode")
-                
-            # CRITICAL FIX: Force compatibility between older ChromeDriver and newer Chrome
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--ignore-ssl-errors')
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            # Set browser version compatibility flag
-            chrome_options.add_experimental_option('w3c', False)
             
-            # Add default arguments for container environments
+            # Add standard arguments for better stability
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--window-size=1280,720')  # Smaller window size
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-            
-            # Additional flags to improve stability in containerized environments
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-infobars')
-            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-            chrome_options.add_argument('--disable-web-security')
-            chrome_options.add_argument('--single-process')  # Critical for memory usage
-            chrome_options.add_argument('--no-zygote')
-            chrome_options.add_argument('--disable-setuid-sandbox')
-            chrome_options.add_argument('--disable-site-isolation-trials')
-            chrome_options.add_argument('--ignore-certificate-errors')
+            chrome_options.add_argument('--window-size=1280,720')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
             
-            # Add unique data directory to prevent conflicts
-            chrome_options.add_argument(f'--user-data-dir=/tmp/chrome-{self._id}')
-            chrome_options.add_argument('--profile-directory=Profile1')
-            
-            # Block unnecessary content types to speed up loading - more aggressive
+            # Block unnecessary content types to speed up loading
             chrome_options.add_experimental_option('prefs', {
                 'profile.default_content_settings.images': 2,  # Don't load images
                 'profile.default_content_setting_values.notifications': 2,  # Block notifications
-                'profile.default_content_setting_values.media_stream': 2,  # Block media access
-                'profile.managed_default_content_settings.images': 2,  # Redundant but to be sure
-                'profile.default_content_setting_values.plugins': 2,  # Block plugins
-                'profile.default_content_setting_values.popups': 2,  # Block popups 
-                'profile.default_content_setting_values.geolocation': 2,  # Block geolocation
-                'profile.default_content_setting_values.automatic_downloads': 2,  # Block downloads
-                'profile.default_content_setting_values.cookies': 1,  # Allow cookies (needed for many sites)
-                'profile.default_content_setting_values.javascript': 1,  # Allow JS (needed for functionality)
-                'profile.default_content_settings.media_stream_mic': 2,  # Block mic access
-                'profile.default_content_settings.media_stream_camera': 2,  # Block camera access
-                'profile.default_content_settings.protocol_handlers': 2,  # Block protocol handlers
-                'profile.default_content_settings.midi_sysex': 2,  # Block MIDI
-                'profile.default_content_settings.push_messaging': 2,  # Block push messages
-                'profile.default_content_settings.ssl_cert_decisions': 2,  # Block SSL cert decisions
-                'disk-cache-size': 4096,  # 4MB disk cache
-                'media-cache-size': 4096  # 4MB media cache
+                'profile.managed_default_content_settings.images': 2  # Redundant but to be sure
             })
             
-            # CRITICAL FIX: Always use pre-installed ChromeDriver with compatibility args
+            # CRITICAL FIX: Use pre-installed ChromeDriver with minimal options
             logger.info("Using pre-installed ChromeDriver at /usr/bin/chromedriver")
-            service_args = ['--verbose', '--log-path=/tmp/soundcloud-chromedriver.log']
-            chrome_service = webdriver.ChromeService(
-                executable_path="/usr/bin/chromedriver",
-                service_args=service_args
-            )
+            service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
             
             try:
-                self.browser = webdriver.Chrome(service=chrome_service, options=chrome_options)
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
                 logger.info("Successfully initialized Chrome browser with pre-installed ChromeDriver")
             except Exception as e:
                 logger.error(f"Failed to initialize browser with pre-installed ChromeDriver: {str(e)}", exc_info=True)
-                # Last resort with relaxed capabilities
-                logger.info("Attempting to initialize with relaxed capabilities")
-                chrome_options.set_capability('browserVersion', '')
-                chrome_options.set_capability('platformName', '')
-                self.browser = webdriver.Chrome(options=chrome_options)
-                
-            # Set implicit wait and timeout (reduced from previous values)
-            self.browser.implicitly_wait(5)  # Reduced from 10 seconds
-            self.browser.set_page_load_timeout(30)  # Keep at 30 seconds
+                # Try with minimal options if first attempt fails
+                logger.info("Retrying with minimal options")
+                minimal_options = webdriver.ChromeOptions()
+                minimal_options.add_argument('--no-sandbox')
+                minimal_options.add_argument('--disable-dev-shm-usage')
+                minimal_options.add_argument('--headless=new')
+                self.browser = webdriver.Chrome(options=minimal_options)
             
-            # Set script timeout
-            self.browser.set_script_timeout(15)  # Reduced from 30 seconds
+            # Set implicit wait and timeout
+            self.browser.implicitly_wait(10)
+            self.browser.set_page_load_timeout(30)
+            self.browser.set_script_timeout(15)
             
             logger.info("SoundCloud browser initialized successfully")
             self._initialized = True
@@ -154,17 +116,6 @@ class SoundCloudService:
                 
                 # Execute basic DOM check
                 self.browser.execute_script("return document.readyState")
-                
-                # Clear any initial dialogs or overlays
-                try:
-                    self.browser.execute_script("""
-                        // Remove any popups or overlays
-                        const overlays = document.querySelectorAll('.overlay, .modal, [class*="cookie"], [class*="gdpr"]');
-                        overlays.forEach(el => el.remove());
-                    """)
-                except Exception:
-                    pass
-                    
             except Exception as e:
                 logger.warning(f"Initial page load failed (non-critical): {str(e)}")
                 # Continue anyway - this is just a warm-up
