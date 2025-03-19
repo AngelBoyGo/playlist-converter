@@ -7,6 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.utils import ChromeType
 import logging
 import re
 from typing import Dict, List, Optional, Any
@@ -69,11 +70,12 @@ class PlaylistScraper:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            # CRITICAL FIX: Use Service with fixed version compatibility for ChromeDriver
-            from selenium.webdriver.chrome.service import Service as ChromeService
-            from selenium.webdriver.chrome.options import Options
+            # CRITICAL FIX: Use webdriver-manager to get the correct ChromeDriver for installed Chrome
+            from selenium import webdriver
+            from webdriver_manager.chrome import ChromeDriverManager
+            from selenium.webdriver.chrome.service import Service
             
-            chrome_options = Options()
+            chrome_options = webdriver.ChromeOptions()
             
             # Check if headless mode is enabled via environment variable
             headless = os.environ.get("SELENIUM_HEADLESS", "true").lower() == "true"
@@ -86,53 +88,28 @@ class PlaylistScraper:
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             
-            # CRITICAL FIX: Tell ChromeDriver to ignore version checks
-            # This is needed for ChromeDriver 114 to work with Chrome 134
-            chrome_options.add_argument('--ignore-certificate-errors')
-            
-            # Set webdriver loglevel for debugging
-            chrome_options.add_argument('--log-level=0')
-            
-            # CRUCIAL: Override the ChromeDriver version check
-            os.environ['WD_CHROME_ARGS'] = '--log-level=ALL --disable-dev-shm-usage --no-sandbox --ignore-certificate-errors'
-            
-            # Create a service object for ChromeDriver
-            service = ChromeService(executable_path="/usr/bin/chromedriver")
+            logger.info("Installing ChromeDriver that matches the installed Chrome version...")
             
             try:
-                # Directly create the WebDriver with version compatibility arguments
-                logger.info("Creating Chrome WebDriver with forced compatibility mode...")
-                self.browser = webdriver.Chrome(service=service, options=chrome_options)
-                logger.info("Successfully initialized Chrome browser")
-            except Exception as e:
-                logger.error(f"First attempt failed: {str(e)}", exc_info=True)
+                # Attempt to install matching ChromeDriver using webdriver-manager
+                driver_path = ChromeDriverManager(chrome_type=ChromeType.GOOGLE).install()
+                logger.info(f"Using ChromeDriver from: {driver_path}")
+                service = Service(executable_path=driver_path)
                 
-                # Try with standalone driver approach as fallback
+                # Create WebDriver with the correct driver
+                self.browser = webdriver.Chrome(service=service, options=chrome_options)
+                logger.info("Successfully initialized Chrome browser with matching ChromeDriver")
+            except Exception as e:
+                logger.error(f"Failed to install matching ChromeDriver: {str(e)}", exc_info=True)
+                
+                # Fallback: Try to use existing ChromeDriver
                 try:
-                    logger.info("Attempting fallback with standalone driver...")
-                    from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
-                    
-                    # Set explicit desired capabilities
-                    capabilities = DesiredCapabilities.CHROME.copy()
-                    capabilities["goog:chromeOptions"] = {
-                        "args": ["--no-sandbox", "--disable-dev-shm-usage", "--headless=new"],
-                        "excludeSwitches": ["enable-automation"],
-                        "useAutomationExtension": False
-                    }
-                    
-                    # Create WebDriver with direct capabilities
-                    self.browser = webdriver.Chrome(
-                        service=service,
-                        options=chrome_options,
-                        desired_capabilities=capabilities
-                    )
-                    logger.info("Successfully initialized Chrome browser with fallback approach")
-                except Exception as inner_e:
-                    logger.error(f"Fallback attempt failed: {str(inner_e)}", exc_info=True)
-                    
-                    # Last resort - try without service
-                    logger.info("Attempting last resort initialization...")
+                    logger.info("Fallback: Using existing ChromeDriver...")
                     self.browser = webdriver.Chrome(options=chrome_options)
+                    logger.info("Successfully initialized Chrome browser with existing ChromeDriver")
+                except Exception as fallback_e:
+                    logger.error(f"Fallback failed: {str(fallback_e)}", exc_info=True)
+                    raise
             
             # Set basic timeouts
             self.browser.implicitly_wait(10)

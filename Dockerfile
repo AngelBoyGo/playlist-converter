@@ -32,34 +32,29 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 RUN echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
 RUN apt-get update && apt-get install -y google-chrome-stable
 
-# Set up ChromeDriver with specific version for compatibility
-ENV CHROMEDRIVER_VERSION "114.0.5735.90"
-RUN mkdir -p /opt/chromedriver
-RUN wget -q --no-check-certificate https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip -O /tmp/chromedriver.zip
-RUN unzip /tmp/chromedriver.zip -d /opt/chromedriver
-RUN mv /opt/chromedriver/chromedriver /usr/bin/chromedriver
-RUN chmod +x /usr/bin/chromedriver
-RUN rm -rf /tmp/chromedriver.zip
+# Configure webdriver-manager to use system Chrome
+ENV WDM_LOG_LEVEL=0
+ENV WDM_PROGRESS_BAR=0
+ENV WDM_SSL_VERIFY=0
+ENV WDM_LOCAL_CACHE_TTL=1800
+ENV USE_SELENIUM_MANAGER=false
 
 # Set Chrome flags for better compatibility
 ENV CHROME_BIN="/usr/bin/google-chrome"
 ENV SELENIUM_HEADLESS=true
 ENV DISPLAY=:99
-ENV CHROMEDRIVER_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --single-process --disable-extensions --remote-debugging-port=9222"
+ENV CHROMEDRIVER_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --disable-extensions"
 
 # Create directories for Chrome
 RUN mkdir -p /tmp/chrome-data /var/chrome_cache
 
 # Configure environment
 ENV PYTHONUNBUFFERED=1
-ENV USE_SELENIUM_MANAGER=false
 ENV PYTHONIOENCODING=utf-8
 
 # Additional environment variables for optimization
 ENV NODE_OPTIONS="--max-old-space-size=256"
 ENV PYTHONHASHSEED=0
-ENV WDM_SSL_VERIFY=0
-ENV WDM_LOG_LEVEL=0
 
 # Set up working directory
 WORKDIR /app
