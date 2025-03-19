@@ -26,42 +26,36 @@ RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install Chrome Browser for Selenium
+RUN apt-get update && apt-get install -y wget gnupg curl unzip xvfb
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+RUN echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
+RUN apt-get update && apt-get install -y google-chrome-stable
 
-# Set up Chrome and install ChromeDriver properly
-RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d '.' -f 1) \
-    && echo "Detected Chrome version: ${CHROME_VERSION}" \
-    # Use specific ChromeDriver version
-    && CHROMEDRIVER_VERSION="114.0.5735.90" \
-    && echo "Using ChromeDriver version: ${CHROMEDRIVER_VERSION}" \
-    && wget -q --no-check-certificate "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" -O /tmp/chromedriver.zip \
-    && unzip /tmp/chromedriver.zip -d /tmp/ \
-    && mv /tmp/chromedriver /usr/bin/chromedriver \
-    && chmod +x /usr/bin/chromedriver \
-    && rm -rf /tmp/chromedriver.zip
+# Set up ChromeDriver with specific version for compatibility
+ENV CHROMEDRIVER_VERSION "114.0.5735.90"
+RUN mkdir -p /opt/chromedriver
+RUN wget -q --no-check-certificate https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip -O /tmp/chromedriver.zip
+RUN unzip /tmp/chromedriver.zip -d /opt/chromedriver
+RUN mv /opt/chromedriver/chromedriver /usr/bin/chromedriver
+RUN chmod +x /usr/bin/chromedriver
+RUN rm -rf /tmp/chromedriver.zip
 
-# Verify installation
-RUN echo "Chrome version:" && google-chrome --version && \
-    echo "ChromeDriver version:" && chromedriver --version
+# Set Chrome flags for better compatibility
+ENV CHROME_BIN="/usr/bin/google-chrome"
+ENV SELENIUM_HEADLESS=true
+ENV DISPLAY=:99
+ENV CHROMEDRIVER_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --single-process --disable-extensions --remote-debugging-port=9222"
 
 # Create directories for Chrome
 RUN mkdir -p /tmp/chrome-data /var/chrome_cache
 
 # Configure environment
-ENV DISPLAY=:99
 ENV PYTHONUNBUFFERED=1
-ENV SELENIUM_HEADLESS=true
 ENV USE_SELENIUM_MANAGER=false
 ENV PYTHONIOENCODING=utf-8
 
 # Additional environment variables for optimization
-ENV CHROMEDRIVER_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --single-process"
 ENV NODE_OPTIONS="--max-old-space-size=256"
 ENV PYTHONHASHSEED=0
 ENV WDM_SSL_VERIFY=0

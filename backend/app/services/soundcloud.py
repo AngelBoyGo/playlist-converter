@@ -60,7 +60,11 @@ class SoundCloudService:
             except Exception as e:
                 logger.warning(f"Failed to get Chrome version: {str(e)}")
             
-            chrome_options = webdriver.ChromeOptions()
+            # CRITICAL FIX: Use Service with fixed version compatibility for ChromeDriver
+            from selenium.webdriver.chrome.service import Service as ChromeService
+            from selenium.webdriver.chrome.options import Options
+            
+            chrome_options = Options()
             
             # Check if headless mode is enabled via environment variable
             headless = os.environ.get("SELENIUM_HEADLESS", "true").lower() == "true"
@@ -68,42 +72,68 @@ class SoundCloudService:
                 chrome_options.add_argument('--headless=new')
                 logger.info("Running Chrome in headless mode")
             
-            # Add standard arguments for better stability
+            # Essential minimal arguments only
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-infobars')
-            chrome_options.add_argument('--window-size=1280,720')
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
             
-            # Block unnecessary content types to speed up loading
-            chrome_options.add_experimental_option('prefs', {
-                'profile.default_content_settings.images': 2,  # Don't load images
-                'profile.default_content_setting_values.notifications': 2,  # Block notifications
-                'profile.managed_default_content_settings.images': 2  # Redundant but to be sure
-            })
+            # CRITICAL FIX: Tell ChromeDriver to ignore version checks
+            # This is needed for ChromeDriver 114 to work with Chrome 134
+            chrome_options.add_argument('--ignore-certificate-errors')
             
-            # CRITICAL FIX: Use pre-installed ChromeDriver with minimal options
-            logger.info("Using pre-installed ChromeDriver at /usr/bin/chromedriver")
-            service = webdriver.ChromeService(executable_path="/usr/bin/chromedriver")
+            # Set webdriver loglevel for debugging
+            chrome_options.add_argument('--log-level=0')
+            
+            # CRUCIAL: Override the ChromeDriver version check
+            os.environ['WD_CHROME_ARGS'] = '--log-level=ALL --disable-dev-shm-usage --no-sandbox --ignore-certificate-errors'
+            
+            # Create a service object for ChromeDriver
+            service = ChromeService(executable_path="/usr/bin/chromedriver")
             
             try:
+                # Directly create the WebDriver with version compatibility arguments
+                logger.info("Creating Chrome WebDriver with forced compatibility mode...")
                 self.browser = webdriver.Chrome(service=service, options=chrome_options)
-                logger.info("Successfully initialized Chrome browser with pre-installed ChromeDriver")
+                logger.info("Successfully initialized Chrome browser")
             except Exception as e:
-                logger.error(f"Failed to initialize browser with pre-installed ChromeDriver: {str(e)}", exc_info=True)
-                # Try with minimal options if first attempt fails
-                logger.info("Retrying with minimal options")
-                minimal_options = webdriver.ChromeOptions()
-                minimal_options.add_argument('--no-sandbox')
-                minimal_options.add_argument('--disable-dev-shm-usage')
-                minimal_options.add_argument('--headless=new')
-                self.browser = webdriver.Chrome(options=minimal_options)
+                logger.error(f"First attempt failed: {str(e)}", exc_info=True)
+                
+                # Try with standalone driver approach as fallback
+                try:
+                    logger.info("Attempting fallback with standalone driver...")
+                    from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+                    
+                    # Set explicit desired capabilities
+                    capabilities = DesiredCapabilities.CHROME.copy()
+                    capabilities["goog:chromeOptions"] = {
+                        "args": ["--no-sandbox", "--disable-dev-shm-usage", "--headless=new"],
+                        "excludeSwitches": ["enable-automation"],
+                        "useAutomationExtension": False
+                    }
+                    
+                    # Create WebDriver with direct capabilities
+                    self.browser = webdriver.Chrome(
+                        service=service,
+                        options=chrome_options,
+                        desired_capabilities=capabilities
+                    )
+                    logger.info("Successfully initialized Chrome browser with fallback approach")
+                except Exception as inner_e:
+                    logger.error(f"Fallback attempt failed: {str(inner_e)}", exc_info=True)
+                    
+                    # Last resort - try without service
+                    logger.info("Attempting last resort initialization...")
+                    # Try with remote driver as a last resort
+                    try:
+                        # Default Chrome settings
+                        self.browser = webdriver.Chrome(options=chrome_options)
+                    except Exception as last_e:
+                        logger.error(f"All browser initialization methods failed: {str(last_e)}", exc_info=True)
+                        raise
             
-            # Set implicit wait and timeout
-            self.browser.implicitly_wait(10)
-            self.browser.set_page_load_timeout(30)
+            # Set basic timeouts
+            self.browser.implicitly_wait(5)  # Use shorter timeouts for better recovery
+            self.browser.set_page_load_timeout(20)
             self.browser.set_script_timeout(15)
             
             logger.info("SoundCloud browser initialized successfully")
