@@ -37,9 +37,10 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 # Set up Chrome and install ChromeDriver properly
 RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d '.' -f 1) \
     && echo "Detected Chrome version: ${CHROME_VERSION}" \
-    && LATEST_DRIVER_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json" | grep -o '"chrome": "[^"]*"' | head -1 | sed 's/"chrome": "\(.*\)"/\1/') \
-    && echo "Using Chrome for Testing version: ${LATEST_DRIVER_URL}" \
-    && wget -q --no-check-certificate "https://storage.googleapis.com/chrome-for-testing-public/$(curl -s https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json | grep -o '"url": "[^"]*chromedriver-linux64.zip"' | sed 's/"url": "//;s/"$//')" -O /tmp/chromedriver.zip \
+    # For Chrome 134, we'll use ChromeDriver 132 (latest known compatible version)
+    && CHROMEDRIVER_VERSION="132.0.6503.130" \
+    && echo "Using ChromeDriver version: ${CHROMEDRIVER_VERSION}" \
+    && wget -q --no-check-certificate "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
     && unzip /tmp/chromedriver.zip -d /tmp/ \
     && mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver \
     && chmod +x /usr/bin/chromedriver \
