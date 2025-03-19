@@ -81,6 +81,22 @@ class PlaylistScraper:
             # Configure Chrome options with EXTREME resource limitations for containers
             chrome_options = webdriver.ChromeOptions()
             
+            # CRITICAL: Create a unique temporary user data directory for each Chrome instance
+            import tempfile
+            import uuid
+            
+            # Create a unique temp directory for Chrome user data to prevent conflicts
+            temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_{uuid.uuid4().hex}_")
+            logger.info(f"Created temporary Chrome user data directory: {temp_dir}")
+            
+            # Add the user-data-dir flag to prevent the "directory in use" error
+            chrome_options.add_argument(f'--user-data-dir={temp_dir}')
+            
+            # Also disable any disk cache to prevent disk usage growth
+            chrome_options.add_argument('--disk-cache-size=1')
+            chrome_options.add_argument('--media-cache-size=1')
+            chrome_options.add_argument('--disable-application-cache')
+            
             # Always use headless mode in production environments
             chrome_options.add_argument('--headless=new')
             logger.info("Running Chrome in headless mode")
@@ -164,25 +180,40 @@ class PlaylistScraper:
                                 self.browser.quit()
                             except:
                                 pass
+                            
+                            # Also try to manually clean up the Chrome user data directory
+                            try:
+                                import shutil
+                                if os.path.exists(temp_dir):
+                                    shutil.rmtree(temp_dir, ignore_errors=True)
+                                    logger.info(f"Cleaned up Chrome user data directory: {temp_dir}")
+                            except Exception as cleanup_error:
+                                logger.warning(f"Failed to clean up Chrome user data directory: {str(cleanup_error)}")
                         
                         if attempt < max_retries:
+                            # Create a new temp directory for each retry
+                            temp_dir = tempfile.mkdtemp(prefix=f"chrome_data_{uuid.uuid4().hex}_retry{attempt}_")
+                            logger.info(f"Created new temporary Chrome user data directory for retry: {temp_dir}")
+                            
                             # Make options even more minimal with each retry
                             if attempt == 2:
-                                # On second attempt, add these extreme options
+                                # On second attempt, add these extreme options while keeping the new temp dir
                                 chrome_options.add_argument('--disable-3d-apis')
                                 chrome_options.add_argument('--disable-accelerated-2d-canvas')
                                 chrome_options.add_argument('--disable-accelerated-jpeg-decoding')
                                 chrome_options.add_argument('--disable-accelerated-mjpeg-decode')
                                 chrome_options.add_argument('--disable-accelerated-video-decode')
+                                chrome_options.add_argument(f'--user-data-dir={temp_dir}')  # Add the new temp dir
                                 logger.info("Adding additional resource restrictions for retry")
                             elif attempt == 3:
-                                # On final attempt, try the absolute minimal configuration
+                                # On final attempt, try the absolute minimal configuration with the new temp dir
                                 chrome_options = webdriver.ChromeOptions()
                                 chrome_options.add_argument('--headless=new')
                                 chrome_options.add_argument('--no-sandbox')
                                 chrome_options.add_argument('--disable-dev-shm-usage')
                                 chrome_options.add_argument('--disable-gpu')
                                 chrome_options.add_argument('--single-process')
+                                chrome_options.add_argument(f'--user-data-dir={temp_dir}')  # Add the new temp dir
                                 logger.info("Using bare minimum browser configuration for final attempt")
                 except Exception as e:
                     logger.error(f"Browser creation error on attempt {attempt}: {str(e)}")
@@ -222,6 +253,23 @@ class PlaylistScraper:
                     logger.info("Browser quit successfully")
                 except Exception as e:
                     logger.warning(f"Error quitting browser: {str(e)}")
+                
+                # Also try to find and clean up any Chrome user data directories we created
+                try:
+                    import shutil
+                    import glob
+                    
+                    # Look for temp directories that match our pattern
+                    temp_dirs = glob.glob("/tmp/chrome_data_*")
+                    for dir_path in temp_dirs:
+                        try:
+                            if os.path.exists(dir_path):
+                                shutil.rmtree(dir_path, ignore_errors=True)
+                                logger.info(f"Cleaned up Chrome user data directory: {dir_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to clean up Chrome user data directory {dir_path}: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Error during Chrome data directory cleanup: {str(e)}")
 
                 self.browser = None
                 self.wait = None
