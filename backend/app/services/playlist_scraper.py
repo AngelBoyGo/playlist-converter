@@ -133,259 +133,212 @@ class PlaylistScraper:
             # Don't raise the exception as this is cleanup code
 
     async def get_apple_music_playlist_data(self, url: str) -> Dict:
-        """Extract playlist data from Apple Music with optimizations to prevent timeouts."""
-        search_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logger.info(f"[TRACE][{search_id}] Starting optimized Apple Music playlist data extraction for URL: {url}")
+        """
+        Extract playlist data from Apple Music with optimized performance.
         
-        # Initialize browser if not already done
-        if not self.browser:
-            await self.initialize_browser()
-            
-        # Use a simplified approach to load the playlist page
+        Uses progressive loading and partial data retrieval to handle slow connections.
+        """
+        self._log_state("start_apple_music_extraction")
+        
         try:
-            logger.info(f"[TRACE][{search_id}] Loading playlist page with optimized settings")
+            # Clear cookies and storage for fresh start
+            self.browser.delete_all_cookies()
+            self.browser.execute_script("""
+                try {
+                    window.localStorage.clear();
+                    window.sessionStorage.clear();
+                    console.log('Storage cleared');
+                } catch(e) {
+                    console.log('Failed to clear storage:', e);
+                }
+            """)
             
-            # Set blocked resources to reduce load time
+            logger.info(f"[TRACE][{datetime.now().strftime('%Y%m%d_%H%M%S')}] Starting optimized Apple Music playlist data extraction for URL: {url}")
+            
+            # PERFORMANCE: Block unnecessary resources like images
+            logger.info(f"[TRACE][{datetime.now().strftime('%Y%m%d_%H%M%S')}] Loading playlist page with optimized settings")
             self.browser.execute_cdp_cmd('Network.setBlockedURLs', {
                 'urls': [
-                    '*.jpg', '*.jpeg', '*.png', '*.gif', '*.svg',  # Block images
-                    # '*.css',  # Be careful with CSS - Apple Music UI might break
-                    '*.woff', '*.woff2', '*.ttf', '*.otf',  # Block fonts
-                    'https://www.google-analytics.com/*',  # Block analytics
-                    'https://analytics.apple.com/*',       # Block Apple analytics
-                    'https://metrics.apple.com/*',         # Block Apple metrics
-                    'https://*.doubleclick.net/*',         # Block ad services
-                    'https://connect.facebook.net/*',      # Block Facebook
+                    '*.jpg', '*.jpeg', '*.png', '*.gif', '*.svg', 
+                    '*.woff', '*.woff2', '*.ttf', '*.otf',
+                    'https://www.google-analytics.com/*',
+                    'https://analytics.apple.com/*',
+                    'https://metrics.apple.com/*',
+                    'https://*.doubleclick.net/*',
+                    'https://connect.facebook.net/*'
                 ]
             })
             
-            # Load the playlist page with timeout handling
+            # Load the page
             self.browser.get(url)
             
-            # Wait a moment for page to start loading
-            await asyncio.sleep(2)
-            
-            # Reduce page processing by stopping animations and heavy rendering
+            # PERFORMANCE: Stop animations and resource-intensive scripts
             self.browser.execute_script("""
-                // Stop animations and timers to reduce CPU usage
-                window.addEventListener('load', function() {
-                    const highPriorityOnly = function() {
-                        // Stop all animations
-                        for (let i = 0; i < 9999; i++) {
-                            window.clearInterval(i);
-                        }
-                        // Stop all timeouts except critical ones
-                        for (let i = 0; i < 9999; i++) {
-                            window.clearTimeout(i);
-                        }
-                    };
-                    setTimeout(highPriorityOnly, 2000);
-                });
-                console.log('Stopped animations and timers');
+                // Force end page loading 
+                window.stop();
+                
+                // Disable costly animations
+                (function() {
+                  var style = document.createElement('style');
+                  style.type = 'text/css';
+                  style.innerHTML = '* { animation-play-state: paused !important; transition: none !important; }';
+                  document.head.appendChild(style);
+                })();
             """)
             
-            # Wait for essential playlist content to load
-            logger.info(f"[TRACE][{search_id}] Waiting for essential playlist content")
+            # Begin extraction immediately with aggressive timeouts
+            logger.info(f"[TRACE][{datetime.now().strftime('%Y%m%d_%H%M%S')}] Starting progressive data extraction")
             
-            # Wait for any of these elements to appear, which would indicate the playlist loaded
-            selectors = [
-                'div.songs-list-container',
-                'div.songs-list',
-                'div.songs-list-row',
-                'div.track-list',
-                'div.playlist-container'
-            ]
-            
-            selector_found = False
-            for selector in selectors:
-                try:
-                    # Use a shorter timeout for each individual selector
-                    WebDriverWait(self.browser, 15).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                    )
-                    logger.info(f"[TRACE][{search_id}] Found playlist content with selector: {selector}")
-                    selector_found = True
-                    break
-                except TimeoutException:
-                    continue
-            
-            if not selector_found:
-                logger.warning(f"[WARN][{search_id}] Could not find any playlist content selectors")
-                # Try checking if we need to sign in
-                try:
-                    signin_button = self.browser.find_element(By.CSS_SELECTOR, 'button.sign-in-button, button[data-test-sign-in-button]')
-                    if signin_button:
-                        logger.error(f"[ERROR][{search_id}] Apple Music requires sign-in to view this playlist")
-                        raise Exception("Apple Music requires sign-in to view this playlist. Try making the playlist public or using a different platform.")
-                except:
-                    # Not a sign-in issue, continue with extraction attempt
-                    pass
-            
-            # Scroll once to load more tracks (not full scroll)
-            self.browser.execute_script("window.scrollTo(0, 300);")
-            await asyncio.sleep(2)
-            
-            # Simplified JavaScript extraction that's less resource-intensive
-            logger.info(f"[TRACE][{search_id}] Extracting playlist data with optimized script")
-            
-            playlist_data = self.browser.execute_script("""
-                function getPlaylistData() {
-                    // Define result object with placeholders
-                    const data = {
-                        name: document.title.replace(' - Apple Music', '') || 'Apple Music Playlist',
-                        tracks: [],
-                        url: window.location.href,
-                        platform: 'Apple Music'
-                    };
-                    
-                    // Get playlist name with minimum selectors
-                    try {
-                        const titleElement = document.querySelector('h1.product-name');
-                        if (titleElement) {
-                            data.name = titleElement.textContent.trim();
-                        }
-                    } catch (e) {
-                        console.error('Error getting playlist title:', e);
-                    }
-                    
-                    // Find track elements with minimal queries
-                    let trackElements = [];
-                    const selectors = [
-                        'div.songs-list-row',
-                        'div.track-list__item',
-                        'div.songs-list div.songs-list__song',
-                        'div.tracklist-item'
-                    ];
-                    
-                    for (const selector of selectors) {
-                        const elements = document.querySelectorAll(selector);
-                        if (elements && elements.length > 0) {
-                            trackElements = Array.from(elements);
-                            break;
-                        }
-                    }
-                    
-                    // Process track elements with minimal DOM queries
-                    trackElements.forEach((track, index) => {
-                        try {
-                            // Skip header rows
-                            if (track.classList.contains('songs-list-header') || 
-                                track.getAttribute('role') === 'heading' ||
-                                track.classList.contains('songs-list__header')) {
-                                return;
-                            }
-                            
-                            // Extract song name with minimal queries
-                            let trackName = '';
-                            const songNameSelectors = [
-                                'div.songs-list-row__song-name',
-                                'div.songs-list__song-name',
-                                'span.songs-list-row__song-name-wrapper'
-                            ];
-                            
-                            for (const selector of songNameSelectors) {
-                                const element = track.querySelector(selector);
-                                if (element) {
-                                    trackName = element.textContent.trim();
-                                    break;
-                                }
-                            }
-                            
-                            if (!trackName) {
-                                // Try alternative approaches
-                                const linkElement = track.querySelector('a[href*="/song/"]');
-                                if (linkElement) {
-                                    trackName = linkElement.textContent.trim();
-                                }
-                            }
-                            
-                            // Skip if no track name found
-                            if (!trackName) {
-                                return;
-                            }
-                            
-                            // Extract artist with minimal queries
-                            let artistName = 'Unknown Artist';
-                            const artistSelectors = [
-                                'div.songs-list-row__by-line',
-                                'div.songs-list__by-line',
-                                'a[href*="/artist/"]'
-                            ];
-                            
-                            for (const selector of artistSelectors) {
-                                const element = track.querySelector(selector);
-                                if (element) {
-                                    artistName = element.textContent.trim();
-                                    break;
-                                }
-                            }
-                            
-                            // Add track with minimal data
-                            data.tracks.push({
-                                name: trackName,
-                                artists: [artistName],
-                                position: index + 1
-                            });
-                        } catch (e) {
-                            console.error('Error processing track:', e);
-                        }
-                    });
-                    
-                    return data;
-                }
-                return getPlaylistData();
-            """)
-            
-            # Validate and clean the data
-            if not playlist_data or not playlist_data.get('tracks') or len(playlist_data.get('tracks', [])) == 0:
-                logger.warning(f"[WARN][{search_id}] No tracks found in Apple Music playlist data")
-                
-                # Try to get a screenshot for debugging
-                try:
-                    screenshot_path = f"empty_apple_playlist_{search_id}.png"
-                    self.browser.save_screenshot(screenshot_path)
-                    logger.info(f"[TRACE][{search_id}] Saved empty playlist screenshot to {screenshot_path}")
-                except Exception as e:
-                    logger.warning(f"[WARN][{search_id}] Failed to save screenshot: {str(e)}")
-                
-                # Check for sign-in requirement
-                try:
-                    signin_text = self.browser.find_element(By.CSS_SELECTOR, 'button.sign-in-button, .ember-view.web-navigation__auth-button').text
-                    if 'Sign In' in signin_text:
-                        logger.error(f"[ERROR][{search_id}] Apple Music requires sign-in to view this playlist")
-                        raise Exception("Apple Music requires sign-in to view this playlist. Try making the playlist public or using a different platform.")
-                except:
-                    pass
-                
-                # Return minimal data
-                return {
-                    "platform": "apple-music",
-                    "url": url,
-                    "name": "Apple Music Playlist",
-                    "tracks": []
-                }
-            
-            # Return the playlist data
-            logger.info(f"[TRACE][{search_id}] Successfully extracted {len(playlist_data.get('tracks', []))} tracks from Apple Music playlist")
-            return {
+            # Default playlist data structure with mandatory fields
+            playlist_data = {
+                "name": "Unknown Playlist",
                 "platform": "apple-music",
                 "url": url,
-                "name": playlist_data.get('name', 'Apple Music Playlist'),
-                "tracks": playlist_data.get('tracks', [])
+                "description": "",
+                "tracks": [],
+                "total_tracks": 0,
+                "scrape_time": datetime.now().isoformat(),
+                "_extraction_method": "progressive"
             }
             
-        except Exception as e:
-            logger.error(f"[ERROR][{search_id}] Error extracting Apple Music playlist data: {str(e)}")
-            
-            # Take screenshot on error
+            # Try to get playlist title (non-blocking, quick attempt)
             try:
-                screenshot_path = f"apple_error_{search_id}.png"
-                self.browser.save_screenshot(screenshot_path)
-                logger.info(f"[TRACE][{search_id}] Saved error screenshot to {screenshot_path}")
-            except Exception as screenshot_err:
-                logger.warning(f"[WARN][{search_id}] Failed to save error screenshot: {str(screenshot_err)}")
+                title_selectors = [
+                    "h1.product-name", 
+                    "div.product-title", 
+                    "div.album-title"
+                ]
                 
-            raise Exception(f"Failed to extract Apple Music playlist data: {str(e)}")
+                for selector in title_selectors:
+                    try:
+                        title_element = self.browser.find_element(By.CSS_SELECTOR, selector)
+                        if title_element:
+                            playlist_data["name"] = title_element.text.strip()
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                logger.warning(f"Failed to get playlist title: {str(e)}")
+            
+            # Try to get track list with multiple selectors (partial data is better than nothing)
+            all_tracks = []
+            
+            # Try multiple selectors that might match track elements
+            track_selectors = [
+                "div.songs-list div.song",
+                "div.songs-list-container div.songs-list-row",
+                "div.track-list div.track",
+                "div.tracklist div.tracklist-item",
+                "div.track-list-container table tr.track-list-row"
+            ]
+            
+            # CRITICAL: Start with a very quick scan of page content to avoid timeout
+            # We'll immediately grab any visible content, even if page isn't fully loaded
+            for selector in track_selectors:
+                try:
+                    # Use a very short explicit wait - 2 seconds max for initial data scan
+                    start_time = time.time()
+                    track_elements = WebDriverWait(self.browser, 2).until(
+                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                    )
+                    
+                    logger.info(f"[TRACE][{datetime.now().strftime('%Y%m%d_%H%M%S')}] Found {len(track_elements)} tracks with selector: {selector}")
+                    
+                    if track_elements:
+                        logger.info(f"Found tracks with selector: {selector}")
+                        # Extract track data with short timeouts per track
+                        for i, track_element in enumerate(track_elements[:50]):  # Process at most 50 tracks to avoid timeout
+                            try:
+                                track_data = await self._extract_track_data(track_element, i)
+                                if track_data and track_data.get("name"):
+                                    all_tracks.append(track_data)
+                            except Exception as e:
+                                logger.warning(f"Error extracting track {i}: {str(e)}")
+                                continue
+                                
+                        # If we found some tracks, we'll consider this a success
+                        if all_tracks:
+                            playlist_data["tracks"] = all_tracks
+                            playlist_data["total_tracks"] = len(all_tracks)
+                            break
+                except Exception as e:
+                    logger.warning(f"Selector {selector} failed: {str(e)}")
+                    continue
+            
+            # If we still don't have tracks, try a more aggressive approach with JavaScript
+            if not all_tracks:
+                logger.info("Attempting JavaScript extraction fallback")
+                try:
+                    # Extract data using JavaScript
+                    track_data_js = self.browser.execute_script("""
+                        // Direct DOM traversal to find track data
+                        const tracks = [];
+                        
+                        // Find all possible track containers
+                        const trackElements = document.querySelectorAll('[class*="song"], [class*="track"], [class*="list-item"]');
+                        
+                        Array.from(trackElements).forEach((elem, index) => {
+                            // Check if this element looks like a track
+                            const hasTitle = elem.querySelector('[class*="title"], [class*="name"]');
+                            const hasArtist = elem.querySelector('[class*="artist"], [class*="subtitle"]');
+                            
+                            if (hasTitle) {
+                                const title = hasTitle.textContent.trim();
+                                const artist = hasArtist ? hasArtist.textContent.trim() : "Unknown Artist";
+                                
+                                if (title && artist && title.length > 0) {
+                                    tracks.push({
+                                        name: title,
+                                        artists: [artist],
+                                        album: "",
+                                        index: index
+                                    });
+                                }
+                            }
+                        });
+                        
+                        // Get the playlist title
+                        let playlistTitle = "Unknown Playlist";
+                        const titleElem = document.querySelector('h1, [class*="title"]:not([class*="track"]):not([class*="song"])');
+                        if (titleElem) {
+                            playlistTitle = titleElem.textContent.trim();
+                        }
+                        
+                        return {
+                            tracks: tracks,
+                            title: playlistTitle
+                        };
+                    """)
+                    
+                    if track_data_js and "tracks" in track_data_js:
+                        js_tracks = track_data_js.get("tracks", [])
+                        if js_tracks:
+                            all_tracks = js_tracks
+                            playlist_data["tracks"] = all_tracks
+                            playlist_data["total_tracks"] = len(all_tracks)
+                            
+                            # Update title if we got one
+                            if track_data_js.get("title") and track_data_js.get("title") != "Unknown Playlist":
+                                playlist_data["name"] = track_data_js.get("title")
+                            
+                            logger.info(f"Extracted {len(all_tracks)} tracks using JavaScript fallback")
+                except Exception as e:
+                    logger.error(f"JavaScript extraction failed: {str(e)}")
+            
+            # Final outcome
+            if all_tracks:
+                logger.info(f"Successfully extracted {len(all_tracks)} tracks from Apple Music playlist")
+                self._log_state("apple_music_extraction_success")
+                return playlist_data
+            else:
+                logger.error("Failed to extract any tracks from Apple Music playlist")
+                self._log_state("apple_music_extraction_failure")
+                raise ScrapingError("No tracks found in Apple Music playlist")
+                
+        except Exception as e:
+            self._log_state("apple_music_extraction_error", e)
+            logger.error(f"Error extracting Apple Music playlist: {str(e)}", exc_info=True)
+            raise
 
     def _log_state(self, action: str, error: Exception = None):
         """Log current state of the scraper."""

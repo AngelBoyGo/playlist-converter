@@ -12,6 +12,10 @@ from pydantic import BaseModel
 from app.services.playlist_scraper import PlaylistScraper
 from app.services.soundcloud import SoundCloudService
 import re
+import time
+from fastapi import BackgroundTasks, Depends
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.exceptions import HTTPException
 
 # Configure logging
 logging.basicConfig(
@@ -156,44 +160,135 @@ def create_success_response(
 
 # Playlist conversion endpoint
 @api_router.post("/convert", response_model=ConversionResponse)
-async def convert_playlist(request: ConversionRequest):
-    request_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    logger.info(f"[TRACE][{request_id}] Starting conversion process for URL: {request.url}")
-    logger.info(f"[TRACE][{request_id}] Request data: {request.dict()}")
+async def convert_playlist(
+    request: ConversionRequest,
+    background_tasks: BackgroundTasks,
+    request_id: str = Depends(get_request_id),
+):
+    """
+    Convert a playlist from one streaming service to another.
     
-    # Initialize variables that might be referenced in finally block
-    scraper = None
-    sc_service = None
-    success_count = 0
-    failure_count = 0
-    results = []
-    converted_tracks = []
+    Args:
+        request: The conversion request containing the playlist URL and target platform.
+        background_tasks: FastAPI background tasks object for cleanup.
+        request_id: A unique identifier for this request.
+        
+    Returns:
+        A response containing the conversion results.
+    """
+    # Initialize response
+    response = ConversionResponse(
+        success=False,
+        message="Processing your request...",
+        success_count=0,
+        failure_count=0,
+        results=[],
+        details=ConversionDetails(
+            converted_tracks=0,
+            total_tracks=0,
+            success_rate=0.0,
+            tracks=[],
+            processing_phase="starting",
+            detailed_status="Initializing conversion services..."
+        )
+    )
     
-    conversion_stats = {
-        'request_id': request_id,
-        'start_time': datetime.now(),
-        'scraper_init_success': False,
-        'soundcloud_init_success': False,
-        'playlist_fetch_success': False,
-        'tracks_processed': 0,
-        'tracks_found': 0,
-        'search_attempts': 0,
-        'search_successes': 0,
-        'errors': [],
-        'perf_stats': {
-            'scraper_init_time': 0,
-            'sc_init_time': 0,
-            'playlist_fetch_time': 0,
-            'search_times': [],
-            'avg_search_time': 0,
-            'total_search_time': 0
+    logger.info(f"[TRACE][{request_id}] Received conversion request for URL: {request.url}")
+    
+    # Record start time
+    start_time = time.time()
+    
+    # Validate URL
+    if not is_valid_url(request.url):
+        logger.error(f"[ERROR][{request_id}] Invalid URL: {request.url}")
+        raise HTTPException(status_code=400, detail="Invalid playlist URL")
+    
+    # Initialize services
+    try:
+        logger.info(f"[TRACE][{request_id}] Initializing playlist scraper...")
+        update_progress(response, "initialization", "Initializing playlist scraper...", "starting")
+        
+        # Initialize the playlist scraper - this starts the browser
+        playlist_scraper = PlaylistScraper()
+        await playlist_scraper.initialize_browser()
+        background_tasks.add_task(playlist_scraper.cleanup)
+        
+        logger.info(f"[TRACE][{request_id}] Initializing SoundCloud service...")
+        update_progress(response, "initialization", "Initializing services...", "setting_up")
+        
+        # Initialize SoundCloud service
+        soundcloud = SoundCloudService()
+        await soundcloud.initialize_browser()
+        background_tasks.add_task(soundcloud.cleanup)
+        
+        init_time = time.time() - start_time
+        response.details.performance_stats = {
+            "initialization_time": round(init_time, 2),
+            "playlist_fetch_time": 0,
+            "conversion_time": 0,
+            "total_time": 0,
+            "tracks_per_second": 0
         }
-    }
+        logger.info(f"[TRACE][{request_id}] SoundCloud service initialized successfully in {init_time:.2f}s")
+        
+    except Exception as e:
+        logger.error(f"[ERROR][{request_id}] Failed to initialize services: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to initialize services: {str(e)}")
     
-    # Track progress for batches
+    # Fetch playlist data
+    try:
+        update_progress(response, "fetching_playlist", "Fetching playlist data", "in_progress")
+        
+        # Increased timeout from 60 to 180 seconds for playlist fetching
+        playlist_fetch_start = time.time()
+        async with timeout_context(180):  # Increased timeout for playlist fetch to 3 minutes
+            logger.info(f"[TRACE][{request_id}] Fetching playlist data from {request.url}")
+            playlist_data = await playlist_scraper.get_playlist_data(request.url)
+            
+        playlist_fetch_time = time.time() - playlist_fetch_start
+        response.details.performance_stats["playlist_fetch_time"] = round(playlist_fetch_time, 2)
+        
+        if not playlist_data or not playlist_data.get("tracks"):
+            logger.error(f"[ERROR][{request_id}] No tracks found in playlist")
+            raise HTTPException(status_code=400, detail="No tracks found in playlist")
+            
+        tracks = playlist_data.get("tracks", [])
+        logger.info(f"[TRACE][{request_id}] Found {len(tracks)} tracks in playlist")
+        
+        # Update response with playlist info
+        response.source_platform = playlist_data.get("platform", "unknown")
+        response.source_playlist_name = playlist_data.get("name", "Unknown Playlist")
+        response.source_playlist_url = request.url
+        
+    except asyncio.TimeoutError:
+        logger.error(f"[ERROR][{request_id}] Playlist fetch timed out after 180 seconds")
+        update_progress(response, "error", "Error: Playlist fetch timed out after 180 seconds. Try again or use a smaller batch size.", "error")
+        response.success = False
+        response.message = "Playlist fetch timed out after 180 seconds. Try again or use a smaller batch size."
+        return response
+    except Exception as e:
+        logger.error(f"[ERROR][{request_id}] Failed to fetch playlist data: {str(e)}", exc_info=True)
+        update_progress(response, "error", f"Error: {str(e)}", "error")
+        response.success = False
+        response.message = f"Failed to fetch playlist data: {str(e)}"
+        return response
+    
+    # Process tracks with pagination
+    tracks = playlist_data.get('tracks', [])
+    if not tracks:
+        error_msg = "No tracks found in the playlist"
+        update_progress(response, "error", f"Error: {error_msg}", "error")
+        logger.error(f"[ERROR][{request_id}] {error_msg}")
+        return response
+    
+    response.details.total_tracks = len(tracks)
+    update_progress(response, "tracks_found", f"Found {len(tracks)} tracks in playlist", "in_progress")
+    logger.info(f"[TRACE][{request_id}] Found {len(tracks)} tracks in playlist")
+    
+    # Calculate total batches
     progress = {
         'current_batch': request.start_index // request.batch_size + 1,
-        'total_batches': 0,  # Will be calculated after we know total tracks
+        'total_batches': (len(tracks) + request.batch_size - 1) // request.batch_size,
         'tracks_in_current_batch': 0,
         'current_track_index': request.start_index,
         'batch_start_time': datetime.now(),
@@ -204,91 +299,16 @@ async def convert_playlist(request: ConversionRequest):
         'last_action_time': datetime.now().isoformat()
     }
     
-    def update_progress(phase, status):
+    def update_progress(response, phase, status, detailed_status):
         """Helper to update progress tracking"""
-        progress['processing_phase'] = phase
-        progress['detailed_status'] = status
-        progress['last_action_time'] = datetime.now().isoformat()
+        response.details.processing_phase = phase
+        response.details.detailed_status = status
+        response.details.last_action_time = datetime.now().isoformat()
         logger.info(f"[TRACE][{request_id}] Progress: {phase} - {status}")
     
     try:
-        # Initialize services
-        update_progress('initializing_scraper', 'Initializing web scraper')
-        start_time = datetime.now()
-        scraper = PlaylistScraper()
-        await scraper.initialize_browser()
-        conversion_stats['scraper_init_success'] = True
-        conversion_stats['perf_stats']['scraper_init_time'] = (datetime.now() - start_time).total_seconds()
-        logger.info(f"[TRACE][{request_id}] Scraper initialized successfully in {conversion_stats['perf_stats']['scraper_init_time']:.2f}s")
-        
-        update_progress('initializing_soundcloud', 'Initializing SoundCloud service')
-        start_time = datetime.now()
-        sc_service = SoundCloudService()
-        await sc_service.initialize_browser()
-        conversion_stats['soundcloud_init_success'] = True
-        conversion_stats['perf_stats']['sc_init_time'] = (datetime.now() - start_time).total_seconds()
-        logger.info(f"[TRACE][{request_id}] SoundCloud service initialized successfully in {conversion_stats['perf_stats']['sc_init_time']:.2f}s")
-        
-        # Get playlist data using the platform-agnostic method
-        try:
-            update_progress('fetching_playlist', 'Fetching playlist data')
-            start_time = datetime.now()
-            
-            # Use a shorter timeout for playlist scraping
-            try:
-                playlist_data = await asyncio.wait_for(
-                    scraper.get_playlist_data(request.url),
-                    timeout=60  # 60 second timeout for playlist fetch
-                )
-            except asyncio.TimeoutError:
-                error_msg = "Playlist fetch timed out after 60 seconds. Try again or use a smaller batch size."
-                update_progress('error', f"Error: {error_msg}")
-                logger.error(f"[ERROR][{request_id}] {error_msg}")
-                return create_error_response(error_msg, request_id, progress)
-                
-            conversion_stats['perf_stats']['playlist_fetch_time'] = (datetime.now() - start_time).total_seconds()
-            
-            if not playlist_data:
-                error_msg = "Failed to fetch playlist data: No data returned"
-                update_progress('error', f"Error: {error_msg}")
-                logger.error(f"[ERROR][{request_id}] {error_msg}")
-                return create_error_response(error_msg, request_id, progress)
-            
-            conversion_stats['playlist_fetch_success'] = True
-            update_progress('playlist_fetched', f"Successfully fetched playlist: {playlist_data.get('name', 'Unknown')} ({conversion_stats['perf_stats']['playlist_fetch_time']:.2f}s)")
-            logger.info(f"[TRACE][{request_id}] Successfully fetched playlist: {playlist_data.get('name', 'Unknown')} from {playlist_data.get('platform', 'Unknown platform')} in {conversion_stats['perf_stats']['playlist_fetch_time']:.2f}s")
-            logger.debug(f"[DEBUG][{request_id}] Raw playlist data: {playlist_data}")
-        except Exception as e:
-            error_msg = f"Failed to fetch playlist data: {str(e)}"
-            update_progress('error', f"Error: {error_msg}")
-            logger.error(f"[ERROR][{request_id}] {error_msg}", exc_info=True)
-            return create_error_response(error_msg, request_id, progress)
-        
-        # Process tracks with pagination
-        tracks = playlist_data.get('tracks', [])
-        if not tracks:
-            error_msg = "No tracks found in the playlist"
-            update_progress('error', f"Error: {error_msg}")
-            logger.error(f"[ERROR][{request_id}] {error_msg}")
-            return create_error_response(error_msg, request_id, progress)
-        
-        conversion_stats['tracks_found'] = len(tracks)
-        update_progress('tracks_found', f"Found {len(tracks)} tracks in playlist")
-        logger.info(f"[TRACE][{request_id}] Found {len(tracks)} tracks in playlist")
-        
-        # Calculate total batches
-        progress['total_batches'] = (len(tracks) + request.batch_size - 1) // request.batch_size
-        
-        # Get the batch of tracks based on start_index and batch_size
-        start_idx = request.start_index
-        end_idx = min(start_idx + request.batch_size, len(tracks))
-        batch_tracks = tracks[start_idx:end_idx]
-        progress['tracks_in_current_batch'] = len(batch_tracks)
-        
-        update_progress('processing_batch', f"Processing batch {progress['current_batch']} of {progress['total_batches']} ({len(batch_tracks)} tracks)")
-        
         # Process tracks in the current batch with timeout protection
-        for i, track in enumerate(batch_tracks, start=start_idx):
+        for i, track in enumerate(tracks, start=request.start_index):
             try:
                 track_name = track.get('name', 'Unknown Track')
                 artists = track.get('artists', ['Unknown Artist'])
@@ -296,8 +316,8 @@ async def convert_playlist(request: ConversionRequest):
                 
                 # Update progress
                 progress['current_track_index'] = i
-                track_number = i - start_idx + 1
-                update_progress('searching_track', f"Searching for track {track_number}/{len(batch_tracks)}: '{track_name}' by {artist_str}")
+                track_number = i - request.start_index + 1
+                update_progress(response, "processing_batch", f"Processing batch {progress['current_batch']} of {progress['total_batches']} ({track_number}/{len(tracks)}): '{track_name}' by {artist_str}", "in_progress")
                 
                 logger.info(f"[TRACE][{request_id}] Processing track {i+1}/{len(tracks)}: '{track_name}' by {artist_str}")
                 
@@ -308,7 +328,7 @@ async def convert_playlist(request: ConversionRequest):
                     # Use a shorter timeout for each search
                     start_time = datetime.now()
                     sc_track = await asyncio.wait_for(
-                        sc_service.search_track(track_name, artist_str),
+                        soundcloud.search_track(track_name, artist_str),
                         timeout=30  # REDUCED: from 60 to 30 second timeout per track
                     )
                     search_time = (datetime.now() - start_time).total_seconds()
@@ -316,7 +336,7 @@ async def convert_playlist(request: ConversionRequest):
                     conversion_stats['perf_stats']['total_search_time'] += search_time
                     
                     if sc_track:
-                        update_progress('track_found', f"Found match for '{track_name}' in {search_time:.2f}s")
+                        update_progress(response, "track_found", f"Found match for '{track_name}' in {search_time:.2f}s", f"Found in {search_time:.2f}s")
                         logger.info(f"[TRACE][{request_id}] Found match: '{sc_track.get('title')}' by {sc_track.get('user', {}).get('username')} in {search_time:.2f}s")
                         conversion_stats['search_successes'] += 1
                         
@@ -337,12 +357,12 @@ async def convert_playlist(request: ConversionRequest):
                         
                         results.append(track_result)
                         converted_tracks.append(converted_track)
-                        success_count += 1
+                        response.success_count += 1
                         
                         logger.info(f"[TRACE][{request_id}] Successfully processed track {i+1}")
                     else:
                         msg = f"No matches found for '{track_name}' by {artist_str} (searched for {search_time:.2f}s)"
-                        update_progress('track_not_found', f"No match found for '{track_name}' in {search_time:.2f}s")
+                        update_progress(response, "track_not_found", f"No match found for '{track_name}' in {search_time:.2f}s", msg)
                         logger.warning(f"[WARN][{request_id}] {msg}")
                         
                         track_result = TrackResult(
@@ -361,21 +381,21 @@ async def convert_playlist(request: ConversionRequest):
                         
                         results.append(track_result)
                         converted_tracks.append(converted_track)
-                        failure_count += 1
+                        response.failure_count += 1
                         
                 except asyncio.TimeoutError:
                     # Handle timeout for this specific track
                     msg = f"Search timed out for '{track_name}' by {artist_str} (after 30s)"
-                    update_progress('track_timeout', f"Search timed out for '{track_name}' after 30s")
+                    update_progress(response, "track_timeout", f"Search timed out for '{track_name}' after 30s", msg)
                     logger.warning(f"[WARN][{request_id}] {msg}")
                     
                     # CRITICAL FIX: Check for browser issues and attempt recovery
                     try:
                         logger.info(f"[TRACE][{request_id}] Attempting browser recovery after timeout")
                         # Recreate SoundCloud service after timeout
-                        await sc_service.cleanup()
-                        sc_service = SoundCloudService()
-                        await sc_service.initialize_browser()
+                        await soundcloud.cleanup()
+                        soundcloud = SoundCloudService()
+                        await soundcloud.initialize_browser()
                         logger.info(f"[TRACE][{request_id}] Successfully reset browser after timeout")
                     except Exception as e:
                         logger.error(f"[ERROR][{request_id}] Failed to reset browser: {str(e)}")
@@ -396,10 +416,10 @@ async def convert_playlist(request: ConversionRequest):
                     
                     results.append(track_result)
                     converted_tracks.append(converted_track)
-                    failure_count += 1
+                    response.failure_count += 1
                 
                 # Estimate completion time after each track
-                tracks_processed = i - start_idx + 1
+                tracks_processed = i - request.start_index + 1
                 if tracks_processed > 0:
                     elapsed_time = (datetime.now() - progress['batch_start_time']).total_seconds()
                     time_per_track = elapsed_time / tracks_processed
@@ -415,15 +435,16 @@ async def convert_playlist(request: ConversionRequest):
                     if conversion_stats['perf_stats']['search_times']:
                         conversion_stats['perf_stats']['avg_search_time'] = conversion_stats['perf_stats']['total_search_time'] / len(conversion_stats['perf_stats']['search_times'])
                     
-                    update_progress('processing_batch', 
-                                   f"Processed {tracks_processed}/{len(batch_tracks)} tracks. Est. remaining: {progress['estimated_completion_time']}. Avg search: {conversion_stats['perf_stats']['avg_search_time']:.2f}s")
+                    update_progress(response, "processing_batch", 
+                                   f"Processed {tracks_processed}/{len(tracks)} tracks. Est. remaining: {progress['estimated_completion_time']}. Avg search: {conversion_stats['perf_stats']['avg_search_time']:.2f}s", 
+                                   f"Processed {tracks_processed}/{len(tracks)} tracks. Est. remaining: {progress['estimated_completion_time']}. Avg search: {conversion_stats['perf_stats']['avg_search_time']:.2f}s")
                 
                 # Check if rate limited based on SoundCloud service stats
                 try:
-                    stats = sc_service.get_stats()
+                    stats = soundcloud.get_stats()
                     if stats.get('rate_limiter', {}).get('limited_requests', 0) > 0:
                         progress['rate_limited'] = True
-                        update_progress('rate_limited', "Hit rate limit - searches may be slower")
+                        update_progress(response, "rate_limited", "Hit rate limit - searches may be slower", "Hit rate limit - searches may be slower")
                 except:
                     pass
                     
@@ -432,7 +453,7 @@ async def convert_playlist(request: ConversionRequest):
                 
             except Exception as e:
                 logger.error(f"[ERROR][{request_id}] Error processing track: {str(e)}", exc_info=True)
-                update_progress('track_error', f"Error processing track: {str(e)}")
+                update_progress(response, "track_error", f"Error processing track: {str(e)}", f"Error processing track: {str(e)}")
                 
                 # Still add a result for the track
                 track_result = TrackResult(
@@ -451,19 +472,19 @@ async def convert_playlist(request: ConversionRequest):
                 
                 results.append(track_result)
                 converted_tracks.append(converted_track)
-                failure_count += 1
+                response.failure_count += 1
             
             # Update conversion stats
             conversion_stats['tracks_processed'] += 1
         
-        update_progress('batch_complete', f"Completed batch {progress['current_batch']} of {progress['total_batches']}. Found {success_count} of {len(batch_tracks)} tracks.")
+        update_progress(response, "batch_complete", f"Completed batch {progress['current_batch']} of {progress['total_batches']}. Found {response.success_count} of {len(tracks)} tracks.", f"Completed batch {progress['current_batch']} of {progress['total_batches']}. Found {response.success_count} of {len(tracks)} tracks.")
         
         # Create conversion details with batch information
         current_batch = {
-            "start": start_idx,
-            "end": end_idx - 1,
-            "end_index": end_idx - 1,
-            "has_more": end_idx < len(tracks),
+            "start": request.start_index,
+            "end": request.start_index + len(tracks) - 1,
+            "end_index": request.start_index + len(tracks) - 1,
+            "has_more": False,
             "batch_size": request.batch_size,
             "current_batch": progress['current_batch'],
             "total_batches": progress['total_batches'],
@@ -480,44 +501,26 @@ async def convert_playlist(request: ConversionRequest):
             'total_search_time': f"{conversion_stats['perf_stats']['total_search_time']:.2f}s",
             'total_time': f"{(datetime.now() - conversion_stats['start_time']).total_seconds():.2f}s",
             'rate_limited': progress['rate_limited'],
-            'browser_stats': sc_service.get_stats() if sc_service else None
+            'browser_stats': soundcloud.get_stats() if soundcloud else None
         }
         
         # Return successful response with all the data
-        return create_success_response(
-            success_count, 
-            failure_count, 
-            results, 
-            converted_tracks, 
-            request_id,
-            current_batch,
-            progress['processing_phase'],
-            progress['detailed_status'],
-            progress['last_action_time'],
-            performance_stats
-        )
+        response.success = True
+        response.message = f"Successfully converted {response.success_count} of {response.details.total_tracks} tracks"
+        response.details.converted_tracks = response.success_count
+        response.details.total_tracks = response.details.total_tracks
+        response.details.success_rate = response.success_count / response.details.total_tracks if response.details.total_tracks > 0 else 0
+        response.details.tracks = converted_tracks
+        response.details.current_batch = current_batch
+        response.details.performance_stats = performance_stats
+        return response
         
     except Exception as e:
         logger.error(f"[ERROR][{request_id}] Conversion process failed: {str(e)}", exc_info=True)
-        update_progress('error', f"Conversion process failed: {str(e)}")
-        return create_error_response(f"Conversion process failed: {str(e)}", request_id, progress)
-        
-    finally:
-        # Clean up resources
-        if scraper:
-            try:
-                await scraper.cleanup()
-            except Exception as e:
-                logger.error(f"[ERROR][{request_id}] Failed to clean up scraper: {str(e)}")
-        
-        if sc_service:
-            try:
-                await sc_service.cleanup()
-            except Exception as e:
-                logger.error(f"[ERROR][{request_id}] Failed to clean up SoundCloud service: {str(e)}")
-                
-        # Log completion
-        logger.info(f"[TRACE][{request_id}] Conversion process completed with {success_count} successes and {failure_count} failures")
+        update_progress(response, "error", f"Conversion process failed: {str(e)}", f"Conversion process failed: {str(e)}")
+        response.success = False
+        response.message = f"Conversion process failed: {str(e)}"
+        return response
 
 # Search endpoint
 @api_router.post("/search")
