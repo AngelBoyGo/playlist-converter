@@ -161,6 +161,14 @@ async def convert_playlist(request: ConversionRequest):
     logger.info(f"[TRACE][{request_id}] Starting conversion process for URL: {request.url}")
     logger.info(f"[TRACE][{request_id}] Request data: {request.dict()}")
     
+    # Initialize variables that might be referenced in finally block
+    scraper = None
+    sc_service = None
+    success_count = 0
+    failure_count = 0
+    results = []
+    converted_tracks = []
+    
     conversion_stats = {
         'request_id': request_id,
         'start_time': datetime.now(),
@@ -202,9 +210,6 @@ async def convert_playlist(request: ConversionRequest):
         progress['detailed_status'] = status
         progress['last_action_time'] = datetime.now().isoformat()
         logger.info(f"[TRACE][{request_id}] Progress: {phase} - {status}")
-    
-    scraper = None
-    sc_service = None
     
     try:
         # Initialize services
@@ -273,11 +278,6 @@ async def convert_playlist(request: ConversionRequest):
         
         # Calculate total batches
         progress['total_batches'] = (len(tracks) + request.batch_size - 1) // request.batch_size
-        
-        results = []
-        success_count = 0
-        failure_count = 0
-        converted_tracks = []
         
         # Get the batch of tracks based on start_index and batch_size
         start_idx = request.start_index

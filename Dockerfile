@@ -1,6 +1,6 @@
 FROM python:3.9-slim
 
-# Install Chrome dependencies and Node.js
+# Update and install dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -26,7 +26,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome stable (without pinning a specific version)
+# Install Chrome
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
@@ -34,28 +34,36 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Get Chrome version and download matching ChromeDriver
-RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | awk -F. '{print $1}') \
-    && wget -q -O /tmp/chromedriver_linux64.zip https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/$(curl -s https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_${CHROME_VERSION})/linux64/chromedriver-linux64.zip \
-    && unzip /tmp/chromedriver_linux64.zip -d /tmp \
-    && mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver \
+# Set up Chrome and install ChromeDriver properly
+RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d '.' -f 1) \
+    && CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") \
+    && echo "Chrome Version: ${CHROME_VERSION}, ChromeDriver Version: ${CHROMEDRIVER_VERSION}" \
+    && wget -q --no-check-certificate "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" -O /tmp/chromedriver.zip \
+    && unzip /tmp/chromedriver.zip -d /tmp/ \
+    && mv /tmp/chromedriver /usr/bin/chromedriver \
     && chmod +x /usr/bin/chromedriver \
-    && rm -rf /tmp/chromedriver_linux64.zip /tmp/chromedriver-linux64
+    && rm /tmp/chromedriver.zip
 
-# Print versions for verification
+# Verify installation
 RUN echo "Chrome version:" && google-chrome --version && \
     echo "ChromeDriver version:" && chromedriver --version
 
-# Set display port to avoid crash
+# Create directories for Chrome
+RUN mkdir -p /tmp/chrome-data /var/chrome_cache
+
+# Configure environment
 ENV DISPLAY=:99
 ENV PYTHONUNBUFFERED=1
 ENV SELENIUM_HEADLESS=true
-ENV USE_SELENIUM_MANAGER=true
+ENV USE_SELENIUM_MANAGER=false
+ENV PYTHONIOENCODING=utf-8
 
 # Additional environment variables for optimization
 ENV CHROMEDRIVER_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --single-process"
 ENV NODE_OPTIONS="--max-old-space-size=256"
 ENV PYTHONHASHSEED=0
+ENV WDM_SSL_VERIFY=0
+ENV WDM_LOG_LEVEL=0
 
 # Set up working directory
 WORKDIR /app
@@ -78,6 +86,9 @@ RUN npm install && \
 # Copy the rest of the application
 WORKDIR /app
 COPY . .
+
+# Create directory for frontend-dist if build in previous step failed
+RUN mkdir -p /app/frontend-dist
 
 # Create a health check endpoint
 RUN echo 'import fastapi; app = fastapi.FastAPI(); @app.get("/api/health"); def health(): return {"status": "ok"}' > /app/health_check.py
