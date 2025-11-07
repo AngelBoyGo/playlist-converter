@@ -1,0 +1,63 @@
+[33mcommit 109815d853614a679ce74aa3f240011c42d7a17c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Code Review Assistant <code-review-assistant@swarmsys.local>
+Date:   Thu Nov 6 19:41:20 2025 -0700
+
+    Auto-fix: Applied 1 fixes
+
+ .gitignore                                         |  122 [32m+[m[31m-[m
+ Dockerfile                                         |  188 [32m+[m[31m-[m
+ README.md                                          |  162 [32m+[m[31m-[m
+ backend/__init__.py                                |    6 [32m+[m[31m-[m
+ backend/app/__init__.py                            |    2 [32m+[m[31m-[m
+ backend/app/main.py                                | 1310 [32m++[m[31m--[m
+ backend/app/main.py.bak                            |  638 [32m+[m[31m-[m
+ backend/app/main.py.bak2                           |  638 [32m+[m[31m-[m
+ backend/app/services/__init__.py                   |    2 [32m+[m[31m-[m
+ backend/app/services/playlist_converter.py         |  536 [32m+[m[31m-[m
+ backend/app/services/playlist_scraper.py           | 2616 [32m+++[m[31m----[m
+ backend/app/services/soundcloud.py                 | 1056 [32m+[m[31m--[m
+ backend/app/services/spotify.py                    |   60 [32m+[m[31m-[m
+ .../app/services/tests/test_playlist_scraper.py    |   18 [32m+[m
+ backend/app/services/utils.py                      |  544 [32m+[m[31m-[m
+ backend/setup.py                                   |   38 [32m+[m[31m-[m
+ backend/test_conversion.py                         |  470 [32m+[m[31m-[m
+ error_screenshot_20250226_202126_track_rows.png    |  Bin [31m341645[m -> [32m0[m bytes
+ error_screenshot_20250226_203437_track_rows.png    |  Bin [31m341619[m -> [32m0[m bytes
+ ...reenshot_20250226_204326_playlist_container.png |  Bin [31m341660[m -> [32m0[m bytes
+ ...reenshot_20250226_204726_playlist_container.png |  Bin [31m341627[m -> [32m0[m bytes
+ ...reenshot_20250226_204844_playlist_container.png |  Bin [31m341645[m -> [32m0[m bytes
+ error_screenshot_20250226_205414_track_rows.png    |  Bin [31m341628[m -> [32m0[m bytes
+ frontend/.bolt/config.json                         |    6 [32m+[m[31m-[m
+ frontend/.bolt/prompt                              |   16 [32m+[m[31m-[m
+ frontend/.gitignore                                |   48 [32m+[m[31m-[m
+ frontend/eslint.config.js                          |   56 [32m+[m[31m-[m
+ frontend/index.html                                |   26 [32m+[m[31m-[m
+ frontend/package-lock.json                         | 8102 [32m++++++++++[m[31m----------[m
+ frontend/package.json                              |   68 [32m+[m[31m-[m
+ frontend/postcss.config.js                         |   12 [32m+[m[31m-[m
+ frontend/src/App.tsx                               |  908 [32m+[m[31m--[m
+ frontend/src/api.ts                                |   72 [32m+[m[31m-[m
+ frontend/src/index.css                             |    6 [32m+[m[31m-[m
+ frontend/src/main.tsx                              |   20 [32m+[m[31m-[m
+ frontend/src/types.ts                              |  162 [32m+[m[31m-[m
+ frontend/src/vite-env.d.ts                         |    2 [32m+[m[31m-[m
+ frontend/tailwind.config.js                        |   16 [32m+[m[31m-[m
+ frontend/tsconfig.app.json                         |   48 [32m+[m[31m-[m
+ frontend/tsconfig.json                             |   14 [32m+[m[31m-[m
+ frontend/tsconfig.node.json                        |   44 [32m+[m[31m-[m
+ frontend/vite.config.ts                            |   20 [32m+[m[31m-[m
+ frontend/web/src/index.html                        | 1056 [32m+[m[31m--[m
+ package-lock.json                                  |  136 [32m+[m[31m-[m
+ package.json                                       |   10 [32m+[m[31m-[m
+ playlist-converter.zip                             |  Bin [31m89512368[m -> [32m0[m bytes
+ render.yaml                                        |   21 [31m-[m
+ requirements.txt                                   |   34 [31m-[m
+ run_api.py                                         |   51 [31m-[m
+ setup.py                                           |   18 [31m-[m
+ spotify_error.png                                  |  Bin [31m341654[m -> [32m0[m bytes
+ spotify_scrape_error.png                           |  Bin [31m341657[m -> [32m0[m bytes
+ spotify_timeout.png                                |  Bin [31m341654[m -> [32m0[m bytes
+ start_server.py                                    |   62 [31m-[m
+ test_api.py                                        |   88 [31m-[m
+ test_backend.py                                    |   92 [31m-[m
+ 56 files changed, 9636 insertions(+), 9984 deletions(-)
