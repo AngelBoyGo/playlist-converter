@@ -5,7 +5,6 @@ from backend.app.services.spotify import playlist
 
 def test_playlist():
     """Test playlist"""
-    # TODO: Implement test
-    # result = playlist()
-    # assert result is not None
-    pass
+    result = playlist(self=None, playlist_id='test_string')
+    assert result is not None
+    # TODO: Add more specific assertions for Dict

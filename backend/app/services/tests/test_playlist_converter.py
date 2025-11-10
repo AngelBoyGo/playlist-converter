@@ -5,21 +5,22 @@ from backend.app.services.playlist_converter import normalize_text, calculate_si
 
 def test_normalize_text():
     """Test normalize_text"""
-    # TODO: Implement test
-    # result = normalize_text()
-    # assert result is not None
-    pass
+    result = normalize_text(text='  HELLO  ')
+    assert result == 'hello'
+
+    # Test case 2
+    result = normalize_text(text='')
+    assert result is not None
+    assert isinstance(result, str)
 
 def test_calculate_similarity():
     """Test calculate_similarity"""
-    # TODO: Implement test
-    # result = calculate_similarity()
-    # assert result is not None
-    pass
+    result = calculate_similarity(a='test_string', b='test_string')
+    assert result is not None
+    # TODO: Add more specific assertions for float
 
 def test_find_best_match():
     """Test find_best_match"""
-    # TODO: Implement test
-    # result = find_best_match()
-    # assert result is not None
-    pass
+    result = find_best_match(self=None, track={}, search_results=[])
+    assert result is not None
+    # TODO: Add more specific assertions for Optional[Dict]

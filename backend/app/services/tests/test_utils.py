@@ -1,46 +1,42 @@
 """Generated test stubs for auto-fix"""
 import pytest
-from backend.app.services.utils import normalize_text, record_success, record_failure
+from backend.app.services.utils import normalize_text, record_success, record_failure, can_execute, get_stats
 
 
 def test_normalize_text():
     """Test normalize_text"""
-    # TODO: Implement test
-    # result = normalize_text()
-    # assert result is not None
-    pass
+    result = normalize_text(text='  HELLO  ')
+    assert result == 'hello'
+
+    # Test case 2
+    result = normalize_text(text='')
+    assert result is not None
+    assert isinstance(result, str)
 
 def test_record_success():
     """Test record_success"""
-    # TODO: Implement test
-    # result = record_success()
-    # assert result is not None
-    pass
+    result = record_success(self=None)
+    assert result is not None
 
 def test_record_failure():
     """Test record_failure"""
-    # TODO: Implement test
-    # result = record_failure()
-    # assert result is not None
-    pass
+    result = record_failure(self=None)
+    assert result is not None
 
 def test_can_execute():
     """Test can_execute"""
-    # TODO: Implement test
-    # result = can_execute()
-    # assert result is not None
-    pass
+    result = can_execute(self=None)
+    assert result is not None
+    assert isinstance(result, bool)
 
 def test_get_stats():
     """Test get_stats"""
-    # TODO: Implement test
-    # result = get_stats()
-    # assert result is not None
-    pass
+    result = get_stats(self=None)
+    assert result is not None
+    # TODO: Add more specific assertions for dict
 
 def test_get_stats():
     """Test get_stats"""
-    # TODO: Implement test
-    # result = get_stats()
-    # assert result is not None
-    pass
+    result = get_stats(self=None)
+    assert result is not None
+    # TODO: Add more specific assertions for dict
