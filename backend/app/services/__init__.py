@@ -1,2 +1,2 @@
 # Initialize services package
-"""Services package for playlist converter.""" 
+"""Services package for playlist converter."""

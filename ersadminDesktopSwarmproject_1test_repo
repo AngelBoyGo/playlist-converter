@@ -1,0 +1,13 @@
+[33mcommit e5611eb804e6569d8a3fea69dc96af3676168b66[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Code Review Assistant <code-review-assistant@swarmsys.local>
+Date:   Mon Nov 10 09:49:29 2025 -0700
+
+    Auto-fix: Applied 6 fixes
+
+ .../app/services/tests/test_playlist_converter.py  | 25 [32m++++++[m[31m------[m
+ .../app/services/tests/test_playlist_scraper.py    | 43 [32m+++++++++++[m[31m---------[m
+ backend/app/services/tests/test_soundcloud.py      |  7 [32m++[m[31m--[m
+ backend/app/services/tests/test_spotify.py         |  7 [32m++[m[31m--[m
+ backend/app/services/tests/test_utils.py           | 46 [32m++++++++++[m[31m------------[m
+ backend/app/tests/test_main.py                     | 35 [32m+++++++[m[31m---------[m
+ 6 files changed, 79 insertions(+), 84 deletions(-)

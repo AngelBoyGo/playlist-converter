@@ -1,4 +1,5 @@
 """Generated test stubs for auto-fix"""
+
 import pytest
 from backend.app.services.soundcloud import get_stats
 

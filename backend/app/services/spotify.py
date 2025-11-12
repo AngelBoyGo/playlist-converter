@@ -5,9 +5,10 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class SpotifyService:
     """Service for interacting with Spotify API."""
-    
+
     def __init__(self):
         """Initialize Spotify client."""
         logger.debug("Initializing SpotifyService...")
@@ -23,9 +24,5 @@ class SpotifyService:
         """Get playlist data from Spotify."""
         if not self.client:
             logger.warning("Spotify client not configured")
-            return {
-                "name": "Untitled Playlist",
-                "tracks": {"items": []},
-                "total": 0
-            }
-        return self.client.playlist(playlist_id) 
+            return {"name": "Untitled Playlist", "tracks": {"items": []}, "total": 0}
+        return self.client.playlist(playlist_id)

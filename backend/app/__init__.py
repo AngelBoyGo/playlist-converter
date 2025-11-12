@@ -1,2 +1,2 @@
 # Initialize app package
-"""App package for playlist converter.""" 
+"""App package for playlist converter."""
